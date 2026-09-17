@@ -1,0 +1,93 @@
+.hero.is-visible h1 {
+  animation: hero-arrival 1.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.hero h1 em,
+.statement h2 em,
+.feature h2 em,
+.contact h2 em,
+.closing em {
+  position: relative;
+  display: inline-block;
+  font-style: italic;
+  padding-bottom: 2px;
+}
+
+.hero h1 em::after,
+.statement h2 em::after,
+.feature h2 em::after,
+.contact h2 em::after,
+.closing em::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+  opacity: 0.85;
+}
+
+.scene.is-visible h1 em::after,
+.scene.is-visible h2 em::after,
+.scene.is-visible .closing em::after {
+  transform: scaleX(1);
+  transition-delay: 0.4s;
+}
+
+.statement.is-visible .badge-row,
+.feature.is-visible .badge-row,
+.manifesto.is-visible .badge-row,
+.contact.is-visible .badge-row {
+  animation: micro-rise 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.arrow {
+  display: inline-block;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+a:hover .arrow,
+button:hover .arrow {
+  transform: translate(3px, -3px);
+}
+
+@keyframes hero-arrival {
+  0% {
+    opacity: 0;
+    transform: translateY(8vh);
+    filter: blur(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes micro-rise {
+  0% {
+    opacity: 0;
+    letter-spacing: 0.28em;
+    transform: translateY(14px);
+  }
+  100% {
+    opacity: 1;
+    letter-spacing: 0.16em;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,128 @@
+.scene-stage {
+  position: relative;
+  height: 180vh;
+}
+
+.scene-stage:last-child {
+  height: 100vh;
+}
+
+.scene {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  min-height: 100vh;
+  z-index: 1;
+  overflow: hidden;
+  box-shadow: 0 -20px 50px rgba(0, 0, 0, 0.25);
+  border-radius: 0;
+  will-change: transform;
+}
+
+.scene-stage:nth-child(1) .scene { z-index: 1; }
+.scene-stage:nth-child(2) .scene { z-index: 2; }
+.scene-stage:nth-child(3) .scene { z-index: 3; }
+.scene-stage:nth-child(4) .scene { z-index: 4; }
+.scene-stage:nth-child(5) .scene { z-index: 5; }
+.scene-stage:nth-child(6) .scene { z-index: 6; }
+
+.scene > * {
+  position: relative;
+  z-index: 2;
+}
+
+.badge-row,
+.statement h2,
+.contact h2,
+.small-copy,
+.statement-creed,
+.email,
+.feature-art,
+.feature-meta,
+.object-studio,
+.closing {
+  transition: opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.65s cubic-bezier(0.16, 1, 0.3, 1),
+              filter 0.65s ease;
+}
+
+.scene:not(.is-visible) .badge-row {
+  opacity: 0;
+  transform: translateY(16px);
+  filter: blur(4px);
+}
+
+.scene.is-visible .badge-row {
+  opacity: 1;
+  transform: translateY(0);
+  filter: blur(0);
+  transition-delay: 0.1s;
+}
+
+.statement:not(.is-visible) h2,
+.contact:not(.is-visible) h2 {
+  opacity: 0;
+  transform: translateY(40px) scale(0.98);
+  filter: blur(8px);
+}
+
+.statement.is-visible h2,
+.contact.is-visible h2 {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+  transition-delay: 0.16s;
+}
+
+.statement:not(.is-visible) .small-copy,
+.statement:not(.is-visible) .statement-creed,
+.contact:not(.is-visible) .contact-center {
+  opacity: 0;
+  transform: translateY(24px);
+}
+
+.statement.is-visible .small-copy,
+.statement.is-visible .statement-creed,
+.contact.is-visible .contact-center {
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 0.25s;
+}
+
+.feature:not(.is-visible) .feature-art {
+  opacity: 0;
+  transform: scale(1.05);
+  clip-path: inset(100% 0 0 0);
+}
+
+.feature.is-visible .feature-art {
+  opacity: 1;
+  transform: scale(1);
+  clip-path: inset(0 0 0 0);
+  transition-delay: 0.2s;
+}
+
+.feature:not(.is-visible) .feature-meta {
+  opacity: 0;
+  transform: translateY(30px);
+  filter: blur(5px);
+}
+
+.feature.is-visible .feature-meta {
+  opacity: 1;
+  transform: translateY(0);
+  filter: blur(0);
+  transition-delay: 0.12s;
+}
+
+@media (max-width: 960px) {
+  .scene-stage {
+    height: auto;
+  }
+  .scene {
+    position: relative;
+    top: auto;
+    height: auto;
+    min-height: 100vh;
+  }
+}
