@@ -192,6 +192,28 @@ export function JellyCanvas({ config, scrollProgress, holdProgress, isEntered, i
     const shardsGroup = new THREE.Group()
     worldGroup.add(shardsGroup)
 
+    // A continuous inner shell sits behind the individual crystal facets. The
+    // source shard mesh is intentionally irregular, so this prevents pinholes
+    // from exposing the jellyfish during the click-and-hold reveal.
+    const shell = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(2.72, 4),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x9db7d7,
+        metalness: 0.08,
+        roughness: 0.16,
+        transmission: 0.12,
+        thickness: 0.45,
+        transparent: true,
+        opacity: 0.72,
+        depthWrite: true,
+        side: THREE.FrontSide,
+        clearcoat: 0.8,
+        clearcoatRoughness: 0.08,
+      }),
+    )
+    shell.renderOrder = 1
+    shardsGroup.add(shell)
+
     // Contact "AURELIA" crystal glass text & floating interactive orbs
     const contactGroup = new THREE.Group()
     contactGroup.visible = false
@@ -199,7 +221,7 @@ export function JellyCanvas({ config, scrollProgress, holdProgress, isEntered, i
     scene.add(contactGroup)
     refs.current.contactGroup = contactGroup
 
-    // ── Crystal-Clear Glass Material Factory ──────────────────────────────────
+    // ── Crystal-Clear Glass Material Factory ───────────────────��──────────────
     const makeGlass = (opts: Partial<THREE.MeshPhysicalMaterialParameters> = {}) =>
       new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
@@ -264,6 +286,7 @@ export function JellyCanvas({ config, scrollProgress, holdProgress, isEntered, i
       })
       jelly.scale.set(0.65, 0.65, 0.65)
       jelly.position.set(0, -0.1, 0)
+      jelly.renderOrder = 0
       jellyGroup.add(jelly)
 
       if (gltf.animations?.length) {
@@ -303,6 +326,7 @@ export function JellyCanvas({ config, scrollProgress, holdProgress, isEntered, i
           m.position.copy(ap)
           m.lookAt(ap.clone().add(nv))
           m.frustumCulled = false
+          m.renderOrder = 2
           shardsGroup.add(m)
 
           const sd = nv.clone().add(new THREE.Vector3(
