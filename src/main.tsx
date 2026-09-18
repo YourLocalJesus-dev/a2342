@@ -121,7 +121,7 @@ function App() {
     sound.playAssembleSweep()
     /* Must stay in lockstep with ASSEMBLE_MS in JellyCanvas. A shade longer so
        the UI lands just after the last plate seats, never before. */
-    window.setTimeout(() => setIsAssembled(true), 2750)
+    window.setTimeout(() => setIsAssembled(true), 3750)
   }
 
   // Lock scrolling before holding to enter

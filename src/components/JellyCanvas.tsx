@@ -163,11 +163,11 @@ const ASSEMBLE_FAR = 62
 const DEFAULT_C1 = '#e392fe'
 const DEFAULT_C2 = '#d357fe'
 
-const JELLY_PALETTE: { at: number; c1: string; c2: string }[] = [
-  { at: 0.0, c1: '#e392fe', c2: '#d357fe' }, // rotate  — the signature violet
-  { at: 0.44, c1: '#6fd0ff', c2: '#3aa0f5' }, // ascend  — cool ascent blue
-  { at: 0.7, c1: '#7af5d0', c2: '#28c9a8' }, // rings   — glass teal
-  { at: 0.93, c1: '#ffc48a', c2: '#ff8f6b' }, // finale  — warm arrival
+const JELLY_PALETTE: { hold: [number, number]; c1: string; c2: string }[] = [
+  { hold: [0.0, 0.24], c1: '#e392fe', c2: '#d357fe' }, // rotate  — signature violet
+  { hold: [0.36, 0.52], c1: '#6fd0ff', c2: '#3aa0f5' }, // ascend  — cool blue
+  { hold: [0.64, 0.76], c1: '#7af5d0', c2: '#28c9a8' }, // rings   — glass teal
+  { hold: [0.88, 1.0], c1: '#ffc48a', c2: '#ff8f6b' }, // finale  — warm arrival
 ]
 
 const PLATE_HW = 0.14605
@@ -983,6 +983,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     const _followLook = new THREE.Vector3()
     const _lockedLook = new THREE.Vector3()
     const _shardWorld = new THREE.Vector3()
+    const _wordDir = new THREE.Vector3()
     const _tintC1 = new THREE.Color()
     const _tintC2 = new THREE.Color()
     const _tmpColor = new THREE.Color()
@@ -1001,6 +1002,20 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     const animate = () => {
       raf = requestAnimationFrame(animate)
       const dt = Math.min(clock.getDelta(), 0.05)
+      /* Frame-rate independent damping.
+         Every `lerp(a, b, k)` in this loop was tuned at 60fps but applied once
+         per FRAME, so the real convergence time changed with the frame rate:
+         a k of 0.085 settles in 433ms at 60fps but 181ms at 144fps and 867ms
+         at 30fps. scroll.ts is now smooth, but the camera and the rig consumed
+         it with these fixed constants, so the picture still lagged the scroll
+         by a different amount at every frame rate — and that amount shifted
+         whenever fps dipped, which is exactly what reads as jerk.
+
+         DAMP(k) reparameterises a 60fps constant against real elapsed time:
+         1 - (1-k)^(dt*60). At exactly 60fps it returns k unchanged, so all the
+         existing tuning is preserved bit-for-bit; at any other rate it matches
+         the same wall-clock curve. */
+      const DAMP = (k60: number) => 1 - Math.pow(1 - k60, dt * 60)
       const t = clock.getElapsedTime()
       const r = refs.current
       const s = r.s
@@ -1013,7 +1028,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       let orbitAngle = -1
       let inRotatePhase = false
 
-      r.enterBlend = lerp(r.enterBlend, entered ? 1 : 0, 0.05)
+      r.enterBlend = lerp(r.enterBlend, entered ? 1 : 0, DAMP(0.05))
 
       /* ── Jellyfish section tint ──────────────────────────────────────────
          Walk the palette, find the two anchors the scroll currently sits
@@ -1029,17 +1044,32 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           _tintC1.copy(r.tintC1)
           _tintC2.copy(r.tintC2)
         } else {
+          /* Each entry owns a HOLD WINDOW where its colour is perfectly
+             constant; the crossfade happens only in the gap between windows.
+             Anchoring on single points instead meant the hue was always in
+             motion — measured 115 RGB of drift across the rotate phase alone —
+             so it read as a slow continuous cycle rather than one colour per
+             section. Now a section looks settled, then changes at the seam. */
           let lo = JELLY_PALETTE[0]
-          let hi = JELLY_PALETTE[JELLY_PALETTE.length - 1]
-          for (let i = 0; i < JELLY_PALETTE.length - 1; i++) {
-            if (s >= JELLY_PALETTE[i].at && s <= JELLY_PALETTE[i + 1].at) {
-              lo = JELLY_PALETTE[i]
-              hi = JELLY_PALETTE[i + 1]
+          let hi = JELLY_PALETTE[0]
+          let f = 0
+          for (let i = 0; i < JELLY_PALETTE.length; i++) {
+            const e = JELLY_PALETTE[i]
+            if (s <= e.hold[1]) {
+              if (s >= e.hold[0] || i === 0) {
+                lo = hi = e // inside the hold window: no movement at all
+                f = 0
+              } else {
+                const prev = JELLY_PALETTE[i - 1]
+                lo = prev
+                hi = e
+                f = easeInOutCubic(clamp01((s - prev.hold[1]) / (e.hold[0] - prev.hold[1])))
+              }
               break
             }
+            lo = hi = e
+            f = 0
           }
-          const span = hi.at - lo.at
-          const f = span > 0 ? easeInOutCubic(clamp01((s - lo.at) / span)) : 0
           _tintC1.set(lo.c1).lerp(_tmpColor.set(hi.c1), f)
           _tintC2.set(lo.c2).lerp(_tmpColor.set(hi.c2), f)
         }
@@ -1070,17 +1100,24 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
            ASSEMBLE_MS they swarm into the lat-long orb while the camera dollies
            in. `assemble` drives both, and main.tsx reveals the click-and-hold UI
            on the same clock, so the interface lands exactly as the orb closes. */
-        const ASSEMBLE_MS = 2600
+        const ASSEMBLE_MS = 3600
         r.assemble =
           r.assembleStart < 0
             ? 0
             : clamp01((performance.now() - r.assembleStart) / ASSEMBLE_MS)
         const asm = easeOutCubic(r.assemble)
+        /* The DOLLY uses its own curve. easeOutCubic is heavily front-loaded —
+           half the time covers 87% of the travel — so the camera rushed in and
+           then crawled the last few units, meaning most of the shot was spent
+           already close to the orb. easeInOutCubic starts slow while the orb is
+           a distant speck, accelerates through the approach, and decelerates
+           into the final framing, so the distance actually reads. */
+        const dollyT = easeInOutCubic(r.assemble)
 
         /* Camera pushes from FAR back to the framing distance as the orb forms.
            19.5 was only ~2.3x the final 8.4, which barely read as a zoom; 62
            starts the orb as a distant speck so the approach has real scale. */
-        const dolly = lerp(ASSEMBLE_FAR, 8.4, asm)
+        const dolly = lerp(ASSEMBLE_FAR, 8.4, dollyT)
         tPos.set(
           r.plx * 1.15 * asm + Math.sin(t * 0.22) * 0.06 * asm,
           r.ply * 1.15 * asm + Math.cos(t * 0.18) * 0.04 * asm,
@@ -1089,8 +1126,8 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         tLook.set(0, 0, 0)
         tRoll = (1 - asm) * 0.12
 
-        worldGroup.rotation.y = lerp(worldGroup.rotation.y, r.plx * 0.3, 0.055)
-        worldGroup.rotation.x = lerp(worldGroup.rotation.x, r.ply * 0.18, 0.055)
+        worldGroup.rotation.y = lerp(worldGroup.rotation.y, r.plx * 0.3, DAMP(0.055))
+        worldGroup.rotation.x = lerp(worldGroup.rotation.x, r.ply * 0.18, DAMP(0.055))
 
         jellyPos.set(0, -0.1, 0)
         jellyGroup.position.copy(jellyPos)
@@ -1107,7 +1144,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         shardsGroup.visible = true
         ringsGroup.visible = s > TL.ascend.start - 0.06
 
-        worldGroup.rotation.x = lerp(worldGroup.rotation.x, 0, 0.06)
+        worldGroup.rotation.x = lerp(worldGroup.rotation.x, 0, DAMP(0.06))
 
         if (s < TL.rotate.end) {
           /* ── PHASE 1 · THE WORLD ROTATES ───────────────────────────────
@@ -1139,7 +1176,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           jellyRot.set(Math.sin(t * 0.8) * 0.05, t * 0.2 + eased * Math.PI * 0.6, Math.cos(t * 0.8) * 0.05)
           jellyScale = 0.65
 
-          worldGroup.rotation.y = lerp(worldGroup.rotation.y, 0, 0.06)
+          worldGroup.rotation.y = lerp(worldGroup.rotation.y, 0, DAMP(0.06))
         } else if (s < TL.ascend.end) {
           /* ── PHASE 2 · THE ASCENT ──────────────────────────────────────
              Words fade, the jellyfish climbs, 3D type drifts past. */
@@ -1213,11 +1250,11 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           tRoll = 0
         }
 
-        jellyGroup.position.lerp(jellyPos, 0.1)
-        jellyGroup.rotation.x = lerp(jellyGroup.rotation.x, jellyRot.x, 0.07)
-        jellyGroup.rotation.y = lerp(jellyGroup.rotation.y, jellyRot.y, 0.07)
-        jellyGroup.rotation.z = lerp(jellyGroup.rotation.z, jellyRot.z, 0.07)
-        jellyGroup.scale.setScalar(lerp(jellyGroup.scale.x, jellyScale, 0.08))
+        jellyGroup.position.lerp(jellyPos, DAMP(0.1))
+        jellyGroup.rotation.x = lerp(jellyGroup.rotation.x, jellyRot.x, DAMP(0.07))
+        jellyGroup.rotation.y = lerp(jellyGroup.rotation.y, jellyRot.y, DAMP(0.07))
+        jellyGroup.rotation.z = lerp(jellyGroup.rotation.z, jellyRot.z, DAMP(0.07))
+        jellyGroup.scale.setScalar(lerp(jellyGroup.scale.x, jellyScale, DAMP(0.08)))
       }
 
       // ── Damp camera ──────────────────────────────────────────────────────
@@ -1225,10 +1262,10 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         camPos.set(0, 0, ASSEMBLE_FAR)
         r.snapFar = false
       }
-      const posK = entered ? 0.085 : 0.045
+      const posK = DAMP(entered ? 0.085 : 0.045)
       camPos.lerp(tPos, posK)
-      camLook.lerp(tLook, entered ? 0.1 : 0.06)
-      camRoll = lerp(camRoll, tRoll, 0.07)
+      camLook.lerp(tLook, DAMP(entered ? 0.1 : 0.06))
+      camRoll = lerp(camRoll, tRoll, DAMP(0.07))
 
       camera.position.copy(camPos)
       camera.up.set(0, 1, 0)
@@ -1250,7 +1287,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         const show = easeOutCubic(near)
         w.group.visible = show > 0.008
         if (!w.group.visible) return
-        w.group.scale.setScalar(lerp(w.group.scale.x, 0.3 + show * 0.66, 0.09))
+        w.group.scale.setScalar(lerp(w.group.scale.x, 0.3 + show * 0.66, DAMP(0.09)))
         const mesh = w.group.children[0] as THREE.Mesh
         const mat = mesh.material as THREE.MeshPhysicalMaterial
         mat.opacity = show * 0.96
@@ -1298,8 +1335,13 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
             return
           }
 
-          const fadeIn = easeOutCubic(clamp01((q + 0.1) / 0.22))
-          const fadeOut = 1 - easeInCubic(clamp01((q - 0.82) / 0.30))
+          /* Tightened so a parked word is only on screen while the camera is
+             actually near its anchor. Now that words no longer ride the
+             camera, a wide window let one linger until it had slid 35deg
+             off-axis toward the frame edge; this keeps the worst case at
+             ~30deg while still leaving no dead frames between words. */
+          const fadeIn = easeOutCubic(clamp01((q + 0.1) / 0.16))
+          const fadeOut = 1 - easeInCubic(clamp01((q - 0.7) / 0.22))
           const show = fadeIn * fadeOut * envelope
 
           tw.group.visible = show > 0.004
@@ -1313,24 +1355,27 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
              instead let it drift to the frame edge while still fully opaque.
              The motion is therefore vertical: it rises from below as it fades
              in and sinks away as it leaves. */
-          /* Use the angle of the ACTUAL camera (camPos is damped and lags the
-             target by `posK`), not the target angle. Driving off the target
-             left every word visibly offset to one side of frame while the
-             camera caught up. atan2 of the live position is always exact. */
-          const a = Math.atan2(camPos.x, camPos.z)
-          /* Incoming word rises from below; outgoing word recedes backwards
-             instead of also sitting low, so during a crossfade the two are
-             separated in depth rather than stacked on the same spot. */
-          const leaving = q > 0.5
-          const rad = TURN_WORD_RADIUS + (1 - show) * (leaving ? 2.6 : 1.2)
-          const yOff = leaving ? (1 - show) * 0.55 : -(1 - show) * 1.45
-          tw.group.position.set(
-            -Math.sin(a) * rad,
-            -0.15 + yOff,
-            -Math.cos(a) * rad
-          )
-          tw.group.rotation.y = a // face square-on to the camera
-          tw.group.scale.setScalar(0.78 + show * 0.22)
+          /* FIXED ON SCREEN — the word does not translate at all.
+             It is placed on the camera's own sight line, just beyond the
+             look-at point, so it projects to exactly the same pixel every
+             frame: dead centre, directly behind the jellyfish. It appears and
+             disappears in place by opacity alone.
+
+             Two earlier attempts both read as "moving with the screen":
+               1. pinned to a fixed WORLD angle — the camera then swept past
+                  it and it slid off toward the frame edge (measured 35deg
+                  off-axis before it faded);
+               2. riding the camera but ALSO animating a rise and a recede —
+                  up to 2.6 units of depth and 1.45 of vertical travel, which
+                  is plenty to read as the text drifting.
+             Deriving the position from camPos/camLook (rather than an azimuth)
+             also keeps it centred under the hero parallax offsets, which a
+             bare atan2 on the camera azimuth does not. */
+          _wordDir.copy(camLook).sub(camPos).normalize()
+          tw.group.position.copy(camLook).addScaledVector(_wordDir, TURN_WORD_RADIUS)
+          // Face the camera square-on.
+          tw.group.rotation.y = Math.atan2(-_wordDir.x, -_wordDir.z)
+          tw.group.scale.setScalar(1)
         })
       }
 
@@ -1356,18 +1401,23 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         const glowMat = ring.glow.material as THREE.MeshBasicMaterial
         glowMat.opacity = easeOutCubic(through) * 0.32
         const pop = 1 + easeOutCubic(through) * 0.05
-        ring.group.scale.setScalar(lerp(ring.group.scale.x, pop, 0.12))
+        ring.group.scale.setScalar(lerp(ring.group.scale.x, pop, DAMP(0.12)))
       })
 
       // ── Shard physics ────────────────────────────────────────────────────
       const m3 = r.mouse3D
       r.shards.forEach((item) => {
         if (!entered) {
-          /* Breathing rides ALONG THE NORMAL, so plates slide radially and
-             stay overlapped instead of separating tangentially. */
+          /* Breathing rides ALONG THE NORMAL so plates slide radially and stay
+             overlapped. Crucially the phase is GLOBAL, not per-plate: with
+             `item.phase` in here every plate sat at a different radius at any
+             instant (measured: 153 distinct radii across 195 plates), so the
+             sphere was never actually symmetric even though it is built that
+             way. One shared phase makes the whole shell inhale and exhale as
+             a single rigid body. */
           item.target
             .copy(item.home)
-            .addScaledVector(item.normal, Math.sin(t * 0.75 + item.phase) * 0.028)
+            .addScaledVector(item.normal, Math.sin(t * 0.75) * 0.028)
 
           /* Fly-in: before the orb is formed each plate is pushed out along its
              own scatter vector, so they converge from all directions. Staggered
@@ -1394,7 +1444,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
             }
           }
           if (hold > 0.01) item.target.addScaledVector(item.scatter, hold * hold * 0.95)
-          item.current.lerp(item.target, 0.085)
+          item.current.lerp(item.target, DAMP(0.085))
           item.mesh.position.copy(item.current)
           /* NO accumulated wobble while the shell is intact.
              This used to be rotateZ(sin(t*0.3 + phase)*0.0007 + hold*spin.z).
@@ -1442,7 +1492,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
              was left behind and the later sections emptied out. In the local
              frame the plate tracks the camera exactly and the easing only ever
              applies to the drift itself. */
-          item.ease = lerp(item.ease, 1, 0.018)
+          item.ease = lerp(item.ease, 1, DAMP(0.018))
           item.current.lerpVectors(item.burst, item.target, item.ease)
           item.mesh.position.set(
             item.current.x,
@@ -1455,7 +1505,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         } else {
           // Plates not chosen for the field fly out and stay gone.
           item.target.copy(item.home).addScaledVector(item.scatter, 1.6)
-          item.current.lerp(item.target, 0.05)
+          item.current.lerp(item.target, DAMP(0.05))
           item.mesh.position.copy(item.current)
           item.mesh.visible = r.enterBlend < 0.995
           item.mesh.rotation.x += item.spin.x
@@ -1475,8 +1525,8 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
 
         contactGroup.position.set(0, WORLD.aureliaY - (1 - eased) * 6.5, 1.4)
         contactGroup.scale.setScalar(lerp(0.9, 1.0, eased))
-        contactGroup.rotation.y = lerp(contactGroup.rotation.y, r.plx * 0.3, 0.06)
-        contactGroup.rotation.x = lerp(contactGroup.rotation.x, r.ply * 0.18, 0.06)
+        contactGroup.rotation.y = lerp(contactGroup.rotation.y, r.plx * 0.3, DAMP(0.06))
+        contactGroup.rotation.x = lerp(contactGroup.rotation.x, r.ply * 0.18, DAMP(0.06))
 
         /* Cursor → world point on the plane of the sculpture. */
         contactGroup.updateMatrixWorld()
