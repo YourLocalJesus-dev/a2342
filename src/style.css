@@ -2224,7 +2224,13 @@ header .header .mobile-menu .bottom a {
   animation: pitchFadeIn 1s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards;
   opacity: 0;
   transform: translateY(16px);
-  pointer-events: auto;
+  /* NONE, not auto. This block is 720px wide and sits 86px off the bottom,
+     which puts its invisible box directly over the customize widget's swatch
+     row. With pointer-events:auto it silently ate every mousemove and click
+     aimed at the widget — the widget was on top visually (z-index
+     2147483000) but never received the pointer. It is non-interactive copy,
+     so it should never be a hit target. */
+  pointer-events: none;
 }
 
 @keyframes pitchFadeIn {
