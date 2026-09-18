@@ -187,14 +187,12 @@ export function ObjectStudio() {
                 transform: `perspective(1000px) rotateY(${tilt.x * 6}deg) rotateX(${-tilt.y * 6}deg) translateZ(0)`
               }}
             >
-              {/* Card top bar */}
-              <div className="card-top-bar">
+                            <div className="card-top-bar">
                 <span className="card-num">{item.num}</span>
                 <span className="card-origin">{item.origin}</span>
               </div>
 
-              {/* Central 3D Visual Stage */}
-              <div className="card-visual-stage">
+                            <div className="card-visual-stage">
                 <div
                   className="specular-glint"
                   style={{
@@ -251,8 +249,7 @@ export function ObjectStudio() {
                 )}
               </div>
 
-              {/* Material Selector Swatches */}
-              <div className="material-picker">
+                            <div className="material-picker">
                 <span className="picker-label">FINISH:</span>
                 <div className="swatches-row">
                   {item.materials.map((m, idx) => (
@@ -274,8 +271,7 @@ export function ObjectStudio() {
                 <span className="active-mat-name">{currentMat.name}</span>
               </div>
 
-              {/* Card Meta & Details */}
-              <div className="card-info">
+                            <div className="card-info">
                 <h3>{item.title}</h3>
                 <p className="card-mat-desc">{currentMat.description}</p>
                 <div className="card-specs-row">
@@ -285,8 +281,7 @@ export function ObjectStudio() {
                 </div>
               </div>
 
-              {/* Inspect Toggle */}
-              <button
+                            <button
                 type="button"
                 className="spec-expand-btn"
                 onClick={() => {
@@ -298,8 +293,7 @@ export function ObjectStudio() {
                 <span className="expand-arrow">{isDetailOpen ? '−' : '+'}</span>
               </button>
 
-              {/* Expanded Atelier Dossier Drawer */}
-              {isDetailOpen && (
+                            {isDetailOpen && (
                 <div className="card-dossier-drawer">
                   <div className="dossier-row">
                     <span className="d-label">EDITION STATUS</span>

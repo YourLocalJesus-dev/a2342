@@ -39,18 +39,11 @@ interface Shard {
   scatter: THREE.Vector3
   spin: THREE.Vector3
   phase: number
-  /* Chosen plates survive the burst as a drifting debris field. `field` is
-     their anchor, with y stored RELATIVE to the camera so the field rides
-     along as the camera climbs the world. */
-  /* The exact orientation the plate was built with. Every per-frame rotation
-     is applied as an offset FROM this, never accumulated onto the mesh, so
-     the shell always returns to a perfectly symmetric rest state. */
+
   baseQuat: THREE.Quaternion
   ambient: boolean
   field: THREE.Vector3
-  /* Where the burst left the plate, captured once on the first ambient frame.
-     The drift eases out of this toward `field`, so there is no jump between
-     the explosion and the ambient pattern. */
+
   burst: THREE.Vector3
   burstSet: boolean
   ease: number
@@ -89,7 +82,6 @@ interface WordSculpture {
   index: number
 }
 
-/* Subtle barrel distortion + chromatic fringing — the "expensive lens" look. */
 const LensShader = {
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
@@ -97,11 +89,11 @@ const LensShader = {
     chroma: { value: 0.0022 },
     vignette: { value: 0.22 },
   },
-  vertexShader: /* glsl */ `
+  vertexShader:  `
     varying vec2 vUv;
     void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
   `,
-  fragmentShader: /* glsl */ `
+  fragmentShader:  `
     uniform sampler2D tDiffuse;
     uniform float k, chroma, vignette;
     varying vec2 vUv;
@@ -123,51 +115,25 @@ const LensShader = {
 const FRACT = (x: number) => x - Math.floor(x)
 const HASH = (i: number) => FRACT(Math.sin(i * 12.9898) * 43758.5453)
 
-/* ── Airtight shard shell constants ────────────────────────────────────────
-   Verified by Monte-Carlo ray casting from inside the jellyfish volume:
-   300 plates on a Fibonacci sphere at R = 2.60, each segRoman plate scaled
-   3.25 (0.95 x 1.10 world units), gives 0.0000% escaping rays — at rest,
-   through the full breathing cycle, and under the cursor dent. That ~2.3x
-   area overprovision is what seals the shell, which the previous
-   per-triangle placement did not (it measured 0.008% leakage: the visible
-   gaps the jellyfish showed through). */
 const SHELL_RADIUS = 2.6
-/* All three perturbations are ZERO: the shell is a perfectly regular mosaic.
-   Every plate sits at exactly SHELL_RADIUS, lies flush on the tangent plane
-   and is exactly the same size, so the latitude bands line up into clean
-   horizontal rings — the ordered, machined look of the reference. Ray casting
-   confirms the symmetric shell is still 0.0000% airtight, so none of this
-   irregularity was ever load-bearing for coverage. */
+
 const SHELL_JITTER = 0
-const SHELL_TILT = 0 // plates lie flush on the tangent plane
-const SHELL_SIZE_VAR = 0 // every plate identical
-/* Desktop and mobile shells. Both were Monte-Carlo verified sealed; the
-   mobile variant trades 130 transmissive draw calls for larger plates. */
-/* `rows` = latitude bands; the count per band is derived so neighbours always
-   overlap, so plate COUNT is an output, not an input (~195 / ~138). */
+const SHELL_TILT = 0
+const SHELL_SIZE_VAR = 0
+
 const SHELL_DESKTOP = { rows: 17, scale: 3.4 }
 const SHELL_MOBILE = { rows: 15, scale: 4.3 }
-// Inscribed half-extents of the segRoman plate at scale 1, used to derive how
-// many plates a latitude band needs in order to stay overlapped.
-/* SECTION PALETTE.
-   One hue per narrative beat. The jellyfish crossfades between these as the
-   scroll moves from one phase to the next, so each section has its own
-   identity without the change ever reading as a hard switch. Anchors are the
-   MIDPOINT of each phase, so the colour is settled while you are inside a
-   section and only in motion across the boundary. */
-/* Camera distance the assembly starts from. At 62 the orb covers ~14% of the
-   half-screen (a distant speck); the old 19.5 covered ~43% and barely read as
-   an approach at all. */
+
 const ASSEMBLE_FAR = 62
 
 const DEFAULT_C1 = '#e392fe'
 const DEFAULT_C2 = '#d357fe'
 
 const JELLY_PALETTE: { hold: [number, number]; c1: string; c2: string }[] = [
-  { hold: [0.0, 0.24], c1: '#e392fe', c2: '#d357fe' }, // rotate  — signature violet
-  { hold: [0.36, 0.52], c1: '#6fd0ff', c2: '#3aa0f5' }, // ascend  — cool blue
-  { hold: [0.64, 0.76], c1: '#7af5d0', c2: '#28c9a8' }, // rings   — glass teal
-  { hold: [0.88, 1.0], c1: '#ffc48a', c2: '#ff8f6b' }, // finale  — warm arrival
+  { hold: [0.0, 0.24], c1: '#e392fe', c2: '#d357fe' },
+  { hold: [0.36, 0.52], c1: '#6fd0ff', c2: '#3aa0f5' },
+  { hold: [0.64, 0.76], c1: '#7af5d0', c2: '#28c9a8' },
+  { hold: [0.88, 1.0], c1: '#ffc48a', c2: '#ff8f6b' },
 ]
 
 const PLATE_HW = 0.14605
@@ -184,20 +150,21 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     holdProgress,
     isEntered,
     isTransitionOpened,
-    assembleStart: -1, // ms timestamp of the START press, -1 until pressed
-    assemble: 0, // 0 = shards far out and scattered, 1 = orb fully formed
+    assembleStart: -1,
+    assemble: 0,
     s: 0,
     vel: 0,
     shards: [] as Shard[],
     balls: [] as Ball[],
+    aureliaMat: null as THREE.MeshPhysicalMaterial | null,
+    ballMat: null as THREE.MeshPhysicalMaterial | null,
+    aureliaFade: 0,
     rings: [] as ProjectRing[],
     words: [] as WordSculpture[],
     turnWords: [] as TurnWord[],
     jellyMatOuter: null as THREE.MeshStandardMaterial | null,
     jellyMatInner: null as THREE.MeshPhysicalMaterial | null,
-    /* Set once the user picks their own colour in the customize widget. From
-       then on their choice wins and the automatic section shift stops, so we
-       never fight the control the user just used. */
+
     snapFar: false,
     userTinted: false,
     tintC1: new THREE.Color('#e392fe'),
@@ -217,24 +184,17 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
   useEffect(() => { refs.current.isEntered = isEntered }, [isEntered])
   useEffect(() => {
     refs.current.isTransitionOpened = isTransitionOpened
-    // Stamp the moment START was pressed; the assembly animation is timed
-    // from here rather than from page load.
+
     if (isTransitionOpened && refs.current.assembleStart < 0) {
       refs.current.assembleStart = performance.now()
-      /* Teleport the camera to the far mark rather than letting it damp out
-         to it. The rig eases toward its target, so without this the camera
-         would DRIFT AWAY from the orb while the shards fly in — the opposite
-         of the intended approach. */
+
       refs.current.snapFar = true
     }
   }, [isTransitionOpened])
 
-  /* Live material sync from the "customize me" widget. */
   useEffect(() => {
     const r = refs.current
-    /* A colour that differs from the default means the user has chosen one in
-       the widget. Their pick then overrides the automatic section shift — the
-       control must always win over the ambient animation. */
+
     if (config.color1 !== DEFAULT_C1 || config.color2 !== DEFAULT_C2) {
       r.userTinted = true
       r.tintC1.set(config.color1)
@@ -260,7 +220,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     const H = () => window.innerHeight
     const isMobile = window.innerWidth < 900
 
-    // ── Scene / camera / renderer ───────────────────────────────────────────
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(38, W() / H(), 0.1, 500)
     camera.position.set(0, 0, 8.4)
@@ -278,20 +237,15 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     renderer.outputColorSpace = THREE.SRGBColorSpace
     el.appendChild(renderer.domElement)
 
-    // ── Post processing ─────────────────────────────────────────────────────
     const composer = new EffectComposer(renderer)
     composer.addPass(new RenderPass(scene, camera))
-    /* Threshold 0.92 against an almost-white frame meant nearly every pixel
-       qualified, so bloom smeared the whole image into a white haze. Raise the
-       threshold above the page value and cut the strength: now only genuine
-       speculars flare. */
+
     const bloom = new UnrealBloomPass(new THREE.Vector2(W(), H()), 0.22, 0.7, 1.05)
     composer.addPass(bloom)
     const lensPass = new ShaderPass(LensShader)
     composer.addPass(lensPass)
     composer.addPass(new OutputPass())
 
-    // ── Sky sphere (drives all the internal refraction) ─────────────────────
     const texLoader = new THREE.TextureLoader()
     const sphereTex = texLoader.load('/hdri/sphere5.png')
     sphereTex.mapping = THREE.EquirectangularReflectionMapping
@@ -305,11 +259,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     whiteTex.wrapS = whiteTex.wrapT = THREE.RepeatWrapping
     whiteTex.repeat.set(100, 100)
 
-    /* The sky drives every refraction in the scene, so its VALUE is what
-       decides whether the glass reads at all. A near-white dome meant white
-       glass on a white page: nothing to see. Tinting it to a deep slate blue
-       gives the shards a dark interior to refract and a value to stand
-       against, which is what makes the faceted sphere legible. */
     const skyMesh = new THREE.Mesh(
       new THREE.SphereGeometry(110, 64, 64),
       new THREE.MeshStandardMaterial({
@@ -330,7 +279,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       scene.environmentIntensity = 1.0
     })
 
-    // ── Lighting ────────────────────────────────────────────────────────────
     const keyLight = new THREE.DirectionalLight(0xffffff, 1.9)
     keyLight.position.set(6, 10, 6)
     scene.add(keyLight)
@@ -347,15 +295,12 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     scene.add(accentPt)
     scene.add(new THREE.AmbientLight(0xffffff, 0.55))
 
-    /* A travelling light that rides with the camera so glass always sparkles,
-       no matter how far up the column we are. */
     const travellerLight = new THREE.PointLight(0xffffff, 1.1, 26)
     scene.add(travellerLight)
 
     const worldGroup = new THREE.Group()
     scene.add(worldGroup)
 
-    // ── Depth particles ─────────────────────────────────────────────────────
     const particleCount = isMobile ? 420 : 900
     const pPos = new Float32Array(particleCount * 3)
     for (let i = 0; i < particleCount; i++) {
@@ -387,7 +332,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     contactGroup.visible = false
     scene.add(contactGroup)
 
-    // ── Glass material factory ──────────────────────────────────────────────
     const makeGlass = (opts: Partial<THREE.MeshPhysicalMaterialParameters> = {}) =>
       new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
@@ -412,7 +356,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
 
     const gltfLoader = new GLTFLoader()
 
-    // ── Jellyfish ───────────────────────────────────────────────────────────
     let mixer: THREE.AnimationMixer | null = null
     gltfLoader.load('/models/Scene14.glb', (gltf) => {
       const root = gltf.scene
@@ -473,7 +416,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       }
     })
 
-    // ── Airtight faceted shell ──────────────────────────────────────────────
     const shards: Shard[] = []
     gltfLoader.load('/models/segRoman.glb', (seg) => {
       let segGeom: THREE.BufferGeometry | null = null
@@ -485,9 +427,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         segGeom ?? new THREE.BoxGeometry(0.304, 0.35, 0.046)
 
       const GOLDEN = Math.PI * (3 - Math.sqrt(5))
-      /* Slightly tinted, slightly rougher glass with a real IOR reads as a
-         faceted crystal; perfectly clear glass on a white page reads as
-         nothing at all. */
+
       const sharedMat = makeGlass({
         color: new THREE.Color('#dce8f7'),
         thickness: 0.85,
@@ -501,22 +441,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       })
       const { rows: SHELL_ROWS, scale: SHARD_SCALE } = isMobile ? SHELL_MOBILE : SHELL_DESKTOP
 
-      /* LAT-LONG MOSAIC.
-         Plates are laid out in latitude bands — each band is a ring of panels
-         sharing one colatitude — so the shell reads as an ordered segmented
-         sphere whose seams form horizontal bands, rather than shards thrown
-         at random (a golden-angle scatter produced exactly the "randomly
-         stacked rectangles" look that was rejected).
-
-         The count per band is DERIVED, not chosen: at colatitude phi the band
-         has circumference 2*PI*R*sin(phi), so it needs ceil(2PI / angularWidth)
-         plates to close. That guarantees neighbours overlap at every latitude,
-         including the tight polar caps, which is what keeps the shell opaque.
-         Odd bands are offset half a plate so seams never line up into a
-         continuous vertical crack (brick bond).
-
-         Verified by Monte-Carlo ray casting: 0.0000% leakage at rest, while
-         breathing, and under the worst-case cursor dent, on both profiles. */
       const plateHW = PLATE_HW * SHARD_SCALE
       const plateHH = PLATE_HH * SHARD_SCALE
       let i = -1
@@ -526,7 +450,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         const bandR = Math.max(1e-4, Math.sin(phi))
         const cosPhi = Math.cos(phi)
 
-        // Angular width one plate spans on this band -> how many close it.
         const angW = 2 * Math.atan(plateHW / (SHELL_RADIUS * bandR))
         const perBand = Math.max(3, Math.ceil((Math.PI * 2) / angW))
 
@@ -550,10 +473,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           )
 
           mesh.position.copy(home)
-          /* lookAt aligns +Z with the normal and keeps +Y as close to world up
-             as possible, so every plate in a band shares an orientation and
-             the grid stays legible. No random spin — that is what made the
-             old shell look like scattered debris. */
+
           mesh.lookAt(home.clone().add(normal))
           mesh.rotateX((HASH(i * 5.9) * 2 - 1) * SHELL_TILT)
           mesh.rotateY((HASH(i * 8.3) * 2 - 1) * SHELL_TILT)
@@ -584,15 +504,9 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
               (HASH(i * 41.7) - 0.5) * 0.02
             ),
             phase: HASH(i * 53.7) * Math.PI * 2,
-            /* Roughly 45% of plates persist as ambient debris. Keeping all of
-               them would crowd the later sections and cost ~195 transmissive
-               draws forever; a subset reads as drifting crystal while the rest
-               genuinely blow away. */
+
             ambient: HASH(i * 61.3) < 0.45,
-            /* Anchor on a tall cylindrical shell around the camera path, with
-               a hollow centre so nothing ever parks in front of the subject.
-               y is relative to the camera and spans a tall band so plates
-               enter and leave frame as the journey climbs. */
+
             baseQuat: mesh.quaternion.clone(),
             burst: new THREE.Vector3(),
             burstSet: false,
@@ -612,7 +526,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       refs.current.shards = shards
     })
 
-    // ── Glass project rings ─────────────────────────────────────────────────
     const ringsGroup = new THREE.Group()
     worldGroup.add(ringsGroup)
 
@@ -622,17 +535,13 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       c.height = 256
       const cx = c.getContext('2d')!
       cx.clearRect(0, 0, c.width, c.height)
-      cx.fillStyle = 'rgba(8, 14, 26, 0.42)'
+      cx.fillStyle = 'rgba(244, 248, 255, 0.92)'
       cx.fillRect(0, 0, c.width, c.height)
-      cx.fillStyle = '#ffffff'
+      cx.fillStyle = '#05080f'
       cx.textAlign = 'center'
       cx.textBaseline = 'middle'
       const unit = `${num}  ·  ${title.toUpperCase()}  ·  ${cat.toUpperCase()}  ·  `
-      /* More, smaller repetitions. At 3 reps the type was ~2 units tall on a
-         17-unit circumference, so when the camera passed THROUGH the ring the
-         letters wrapped right around the field of view and collided with
-         themselves. 7 smaller reps read as an engraved ticker band, and the
-         DOM card stays the thing you actually read the project name from. */
+
       const reps = 7
       cx.font = 'bold 52px "IBM Plex Mono", monospace'
       const w = c.width / reps
@@ -644,9 +553,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       return tex
     }
 
-    // Smaller rings: the jellyfish shrinks to pass through, so a tighter hoop
-    // keeps it reading as a gate rather than a distant halo.
-    const RING_R = 2.35
+    const RING_R = 3.1
     const torusGeo = new THREE.TorusGeometry(RING_R, 0.3, 28, 128)
     const bandGeo = new THREE.CylinderGeometry(RING_R + 0.42, RING_R + 0.42, 0.8, 128, 1, true)
     const glowGeo = new THREE.TorusGeometry(RING_R, 0.44, 20, 96)
@@ -665,7 +572,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     PROJECTS.forEach((proj, idx) => {
       const g = new THREE.Group()
       g.position.set(0, WORLD.ringY[idx], 0)
-      g.rotation.x = Math.PI / 2 // lie flat so the jellyfish rises through it
+      g.rotation.x = Math.PI / 2
 
       const torus = new THREE.Mesh(torusGeo, ringGlass)
       g.add(torus)
@@ -688,16 +595,12 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           map: makeBandTexture(proj.id, proj.title, proj.category),
           transparent: true,
           opacity: 0,
-          /* FrontSide, not DoubleSide. The band is an open cylinder, so
-             DoubleSide also drew its BACK wall — the far side of the ring
-             showing through the near side, mirrored. Two counter-running
-             copies of the project name overlapped into unreadable text. */
+
           side: THREE.FrontSide,
           depthWrite: false,
         })
       )
-      // Cancel the group's X rotation so the band axis is world-vertical and
-              // the type reads upright rather than upside-down.
+
       band.rotation.x = -Math.PI / 2
       g.add(band)
 
@@ -714,11 +617,10 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     })
     refs.current.rings = rings
 
-    // ── Typography: 3D word sculptures + AURELIA ────────────────────────────
     const ASCENT_WORDS = ['IMMERSE', 'AND', 'INSPIRE', 'DELIGHT']
 
     const buildTypography = (font: Font) => {
-      /* --- Word sculptures that drift past during the ascent --- */
+
       const wordMat = makeGlass({
         color: new THREE.Color('#0d1524'),
         transmission: 0.74,
@@ -731,13 +633,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         depthWrite: true,
       })
 
-      /* --- PHASE 1 ROTATION WORDS ------------------------------------------
-         These are real 3D text meshes parked on the orbit circle BEHIND the
-         jellyfish, one every 90 degrees. The camera swings around that circle,
-         so each quarter turn naturally brings the next word round to face you
-         and carries the previous one away. Because visibility is a function of
-         camera ANGLE rather than a scroll window, the outgoing word fades out
-         gradually as you keep scrolling instead of snapping off.             */
       const turnMat = () =>
         new THREE.MeshPhysicalMaterial({
           color: new THREE.Color('#05080f'),
@@ -770,10 +665,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         const g = new THREE.Group()
         g.add(mesh)
 
-        /* The camera orbits at (sin a, 0, cos a) * 8.4. To read BEHIND the
-           jellyfish the word must sit on the OPPOSITE side of the origin, so
-           its position is negated. rotation.y = a still turns its face back
-           toward the camera. */
         const a = TURN_ANCHORS[i]
         g.position.set(-Math.sin(a) * TURN_RADIUS, -0.15, -Math.cos(a) * TURN_RADIUS)
         g.rotation.y = a
@@ -815,7 +706,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       })
       refs.current.words = words
 
-      /* --- AURELIA: glassy, modest in size, always legible --- */
       const aureliaMat = makeGlass({
         color: new THREE.Color('#121b2b'),
         transmission: 0.8,
@@ -823,7 +713,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         metalness: 0.1,
         thickness: 1.15,
         ior: 1.56,
-        opacity: 0.96,
+        opacity: 0,
         iridescence: 0.55,
         reflectivity: 0.95,
         envMapIntensity: 4.4,
@@ -860,11 +750,10 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         cx += w + spacing
       })
       contactGroup.add(lettersGroup)
-      // Half-extent of the whole sculpture (letters + the orb halo around it),
-      // used to pull the camera back far enough on narrow/portrait viewports.
+      refs.current.aureliaMat = aureliaMat
+
       refs.current.aureliaHalfW = totalW / 2 + 0.55
 
-      /* --- White orbs draped over the word, repelled by the cursor --- */
       const balls: Ball[] = []
       const ballMat = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
@@ -879,16 +768,16 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         ior: 1.5,
         reflectivity: 0.94,
         envMapIntensity: 3.4,
+        transparent: true,
+        opacity: 0,
       })
       const ballGeo = new THREE.SphereGeometry(1, 28, 28)
+      refs.current.ballMat = ballMat
 
       const halfW = totalW / 2 + 0.3
       const BALL_N = isMobile ? 26 : 40
       for (let i = 0; i < BALL_N; i++) {
-        /* Golden-ratio stratification across X guarantees even coverage of the
-           whole wordmark; pure hashing clumped the orbs into one corner and
-           left the rest of AURELIA bare. Y is a shallow band so they drape
-           over the letters rather than orbiting them. */
+
         const u = FRACT(i * 0.6180339887 + 0.37)
         const jitterX = (HASH(i * 1.7) - 0.5) * (halfW / BALL_N) * 2.4
         const x = (u * 2 - 1) * halfW + jitterX
@@ -915,7 +804,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
 
     new FontLoader().load('/fonts/Druk_Regular.json', buildTypography)
 
-    // ── Pointer ─────────────────────────────────────────────────────────────
     const raycaster = new THREE.Raycaster()
     const planeZ = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0)
     const tmpHit = new THREE.Vector3()
@@ -960,17 +848,11 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     }
     window.addEventListener('resize', onResize)
 
-    // ── Scroll subscription (shared eased clock) ────────────────────────────
     const unsubscribe = scrollStore.subscribe((smooth, velocity) => {
       refs.current.s = smooth
       refs.current.vel = velocity
     })
 
-    // ── Camera rig ──────────────────────────────────────────────────────────
-    /* We drive a target position + target look-at, then critically damp both.
-       Damping the look-at (instead of snapping it) is what removes the jerk
-       when the camera hands off from "follow the jellyfish" to "frame
-       AURELIA" — the transition reads as a deliberate camera move. */
     const camPos = new THREE.Vector3(0, 0, 8.4)
     const camLook = new THREE.Vector3(0, 0, 0)
     const tPos = new THREE.Vector3(0, 0, 8.4)
@@ -1002,19 +884,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     const animate = () => {
       raf = requestAnimationFrame(animate)
       const dt = Math.min(clock.getDelta(), 0.05)
-      /* Frame-rate independent damping.
-         Every `lerp(a, b, k)` in this loop was tuned at 60fps but applied once
-         per FRAME, so the real convergence time changed with the frame rate:
-         a k of 0.085 settles in 433ms at 60fps but 181ms at 144fps and 867ms
-         at 30fps. scroll.ts is now smooth, but the camera and the rig consumed
-         it with these fixed constants, so the picture still lagged the scroll
-         by a different amount at every frame rate — and that amount shifted
-         whenever fps dipped, which is exactly what reads as jerk.
 
-         DAMP(k) reparameterises a 60fps constant against real elapsed time:
-         1 - (1-k)^(dt*60). At exactly 60fps it returns k unchanged, so all the
-         existing tuning is preserved bit-for-bit; at any other rate it matches
-         the same wall-clock curve. */
       const DAMP = (k60: number) => 1 - Math.pow(1 - k60, dt * 60)
       const t = clock.getElapsedTime()
       const r = refs.current
@@ -1024,32 +894,17 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
 
       if (mixer) mixer.update(dt * (0.85 + s * 0.45))
 
-      // Live orbit angle for phase 1, consumed by the rotation-word crossfade.
       let orbitAngle = -1
       let inRotatePhase = false
 
       r.enterBlend = lerp(r.enterBlend, entered ? 1 : 0, DAMP(0.05))
 
-      /* ── Jellyfish section tint ──────────────────────────────────────────
-         Walk the palette, find the two anchors the scroll currently sits
-         between, and interpolate. easeInOutCubic on the segment fraction
-         means the hue is stationary in the middle of a section and only
-         moves across the boundary, so it never looks like a colour cycle.
-
-         The result is then eased toward per-frame with a small lerp: that
-         second stage is what guarantees smoothness even if the scroll value
-         jumps (a scrollbar drag, an anchor jump, a dropped frame). */
       if (r.jellyMatOuter || r.jellyMatInner) {
         if (r.userTinted) {
           _tintC1.copy(r.tintC1)
           _tintC2.copy(r.tintC2)
         } else {
-          /* Each entry owns a HOLD WINDOW where its colour is perfectly
-             constant; the crossfade happens only in the gap between windows.
-             Anchoring on single points instead meant the hue was always in
-             motion — measured 115 RGB of drift across the rotate phase alone —
-             so it read as a slow continuous cycle rather than one colour per
-             section. Now a section looks settled, then changes at the seam. */
+
           let lo = JELLY_PALETTE[0]
           let hi = JELLY_PALETTE[0]
           let f = 0
@@ -1057,7 +912,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
             const e = JELLY_PALETTE[i]
             if (s <= e.hold[1]) {
               if (s >= e.hold[0] || i === 0) {
-                lo = hi = e // inside the hold window: no movement at all
+                lo = hi = e
                 f = 0
               } else {
                 const prev = JELLY_PALETTE[i - 1]
@@ -1074,7 +929,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           _tintC2.set(lo.c2).lerp(_tmpColor.set(hi.c2), f)
         }
 
-        // Frame-rate independent approach, same half-life idea as the scroll.
         const ck = 1 - Math.pow(2, -dt / 0.22)
         if (r.jellyMatOuter) {
           r.jellyMatOuter.color.lerp(_tintC1, ck)
@@ -1092,31 +946,18 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       )
 
       if (!entered) {
-        /* ── HERO: faceted sphere, gentle breathing parallax ─────────────── */
+
         contactGroup.visible = false
 
-        /* ASSEMBLY.
-           On START the shards are flung far out and the camera sits back; over
-           ASSEMBLE_MS they swarm into the lat-long orb while the camera dollies
-           in. `assemble` drives both, and main.tsx reveals the click-and-hold UI
-           on the same clock, so the interface lands exactly as the orb closes. */
         const ASSEMBLE_MS = 3600
         r.assemble =
           r.assembleStart < 0
             ? 0
             : clamp01((performance.now() - r.assembleStart) / ASSEMBLE_MS)
         const asm = easeOutCubic(r.assemble)
-        /* The DOLLY uses its own curve. easeOutCubic is heavily front-loaded —
-           half the time covers 87% of the travel — so the camera rushed in and
-           then crawled the last few units, meaning most of the shot was spent
-           already close to the orb. easeInOutCubic starts slow while the orb is
-           a distant speck, accelerates through the approach, and decelerates
-           into the final framing, so the distance actually reads. */
+
         const dollyT = easeInOutCubic(r.assemble)
 
-        /* Camera pushes from FAR back to the framing distance as the orb forms.
-           19.5 was only ~2.3x the final 8.4, which barely read as a zoom; 62
-           starts the orb as a distant speck so the approach has real scale. */
         const dolly = lerp(ASSEMBLE_FAR, 8.4, dollyT)
         tPos.set(
           r.plx * 1.15 * asm + Math.sin(t * 0.22) * 0.06 * asm,
@@ -1137,26 +978,20 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         ringsGroup.visible = false
         shardsGroup.visible = true
       } else {
-        /* ── THE JOURNEY ─────────────────────────────────────────────────── */
-        /* The shards NEVER disappear. After the burst they become a permanent
-           ambient debris field that follows the camera up the world, so every
-           later section still has crystal drifting through it for depth. */
+
         shardsGroup.visible = true
         ringsGroup.visible = s > TL.ascend.start - 0.06
 
         worldGroup.rotation.x = lerp(worldGroup.rotation.x, 0, DAMP(0.06))
 
         if (s < TL.rotate.end) {
-          /* ── PHASE 1 · THE WORLD ROTATES ───────────────────────────────
-             Camera orbits the jellyfish on a level plane. Y never changes:
-             no rise, no fall — it turns. Four quarter turns, each eased so
-             it accelerates, sweeps, then settles before the next word. */
+
           const p = norm(s, TL.rotate.start, TL.rotate.end)
           const TURNS = 4
           const raw = p * TURNS
           const turnIndex = Math.min(Math.floor(raw), TURNS - 1)
           const within = raw - turnIndex
-          // Ease within each quarter so each "turn" lands with weight.
+
           const eased = (turnIndex + easeInOutCubic(within)) / TURNS
           const angle = eased * Math.PI * 2
           const radius = 8.4
@@ -1165,11 +1000,11 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
 
           tPos.set(
             Math.sin(angle) * radius + r.plx * 0.5,
-            r.ply * 0.35, // strictly level — parallax only, never scroll-driven
+            r.ply * 0.35,
             Math.cos(angle) * radius
           )
           tLook.set(0, -0.1, 0)
-          // A whisper of roll on the sweep, zero at each settle point.
+
           tRoll = Math.sin(within * Math.PI) * 0.035 * (turnIndex % 2 === 0 ? 1 : -1)
 
           jellyPos.set(0, -0.1, 0)
@@ -1178,16 +1013,11 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
 
           worldGroup.rotation.y = lerp(worldGroup.rotation.y, 0, DAMP(0.06))
         } else if (s < TL.ascend.end) {
-          /* ── PHASE 2 · THE ASCENT ──────────────────────────────────────
-             Words fade, the jellyfish climbs, 3D type drifts past. */
+
           const p = norm(s, TL.ascend.start, TL.ascend.end)
           const eased = easeInOutCubic(p)
           const y = eased * WORLD.ascendTopY
 
-          /* Every oscillator below uses sin(p·π·even) so it returns to zero at
-             BOTH ends, and every offset lerps from the pose the previous phase
-             finished on to the pose the next phase begins on. That makes the
-             phase seams continuous — no lurch when the timeline hands over. */
           jellyPos.set(Math.sin(p * Math.PI * 2) * 0.45, y, Math.sin(p * Math.PI) * 0.4)
           jellyRot.set(-0.1, t * 0.22 + p * Math.PI * 1.1, Math.cos(p * Math.PI * 2) * 0.05)
           jellyScale = lerp(0.65, 0.58, p)
@@ -1200,47 +1030,34 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           tLook.set(jellyPos.x, y + lerp(-0.1, 0.35, eased), jellyPos.z)
           tRoll = Math.sin(p * Math.PI * 2) * 0.03
         } else if (s < TL.rings.end) {
-          /* ── PHASE 3 · GLASS PROJECT RINGS ─────────────────────────────
-             The jellyfish shrinks and threads through all four rings while
-             the camera stays locked just behind it. */
+
           const p = norm(s, TL.rings.start, TL.rings.end)
           const y = lerp(WORLD.ascendTopY, WORLD.ringsExitY, p)
 
           jellyPos.set(Math.sin(p * Math.PI * 3) * 0.14, y, Math.sin(p * Math.PI * 2) * 0.12)
           jellyRot.set(-0.14, t * 0.26 + p * Math.PI * 2.2, Math.sin(p * Math.PI * 4) * 0.06)
-          // Shrink quickly at the start so it clearly fits through the rings.
-          jellyScale = lerp(0.58, 0.2, easeOutCubic(clamp01(p / 0.55)))
+          jellyScale = 0.58
 
-          /* sin(p·2π) is zero at p=0 and p=1, and the Z term is written as a
-             (1-cos) swell rather than a cos so it also starts at exactly the
-             7.85 the ascent ended on. Both seams stay continuous. */
           const orbit = Math.sin(p * Math.PI * 2) * 1.35
           const zSwell = (1 - Math.cos(p * Math.PI * 2)) * 0.5
           tPos.set(orbit + r.plx * 0.5, y - 0.75 + r.ply * 0.3, 7.85 - zSwell)
           tLook.set(jellyPos.x, y + 0.35, jellyPos.z)
           tRoll = Math.sin(p * Math.PI * 2) * 0.04
         } else {
-          /* ── PHASE 4 · CAMERA DETACHES, AURELIA ARRIVES ────────────────
-             The jellyfish keeps rising out of frame; the camera stops
-             chasing it and eases onto the AURELIA sculpture. */
+
           const p = norm(s, TL.finale.start, TL.finale.end)
-          const hand = easeOutQuint(clamp01(p / 0.42)) // handoff weight
+          const hand = easeOutQuint(clamp01(p / 0.42))
 
           const jy = WORLD.ringsExitY + p * 22
           jellyPos.set(Math.sin(p * Math.PI) * 0.6, jy, -p * 7)
           jellyRot.set(-0.2, t * 0.3 + p * Math.PI, 0)
-          jellyScale = lerp(0.2, 0.13, p)
+          jellyScale = lerp(0.58, 0.42, p)
 
-          /* Blend from "trailing the jellyfish" to the locked hero shot. */
-          // Matches the exact camera pose the rings phase ends on, so the
-          // handoff starts from zero discontinuity.
           _followPos.set(r.plx * 0.5, jy - 0.75, 7.85)
-          /* Frame AURELIA to the viewport instead of a fixed distance: on a
-             portrait phone the horizontal FOV is tiny, so dolly back until the
-             sculpture plus its orbs comfortably fit with margin. */
+
           const halfFov = (camera.fov / 2) * (Math.PI / 180)
           const needed = (r.aureliaHalfW * 1.16) / (Math.tan(halfFov) * camera.aspect)
-          const dolly = Math.max(6.7, needed) + 1.4 // +1.4 = sculpture's own Z
+          const dolly = Math.max(6.7, needed) + 1.4
           _lockedPos.set(r.plx * 0.55, WORLD.aureliaY + 0.05, dolly + r.ply * 0.3)
           tPos.copy(_followPos).lerp(_lockedPos, hand)
 
@@ -1257,7 +1074,6 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         jellyGroup.scale.setScalar(lerp(jellyGroup.scale.x, jellyScale, DAMP(0.08)))
       }
 
-      // ── Damp camera ──────────────────────────────────────────────────────
       if (r.snapFar) {
         camPos.set(0, 0, ASSEMBLE_FAR)
         r.snapFar = false
@@ -1274,14 +1090,11 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
 
       travellerLight.position.set(camPos.x + 2.5, camPos.y + 1.5, camPos.z - 1.0)
 
-      // ── Particles ────────────────────────────────────────────────────────
       particlePoints.rotation.y = t * 0.012
       particleMat.opacity = 0.35 + Math.min(Math.abs(r.vel) * 22, 0.4)
 
-      // ── Word sculptures ──────────────────────────────────────────────────
       r.words.forEach((w) => {
-        // Local visibility window keyed off camera height, so they reveal as
-        // the jellyfish passes rather than all at once.
+
         const d = camPos.y - w.y
         const near = clamp01(1 - Math.abs(d) / 9)
         const show = easeOutCubic(near)
@@ -1296,24 +1109,8 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         w.group.position.x = w.side * lerp(5.1, 3.6, show)
       })
 
-      // ── Rotation words (phase 1) ─────────────────────────────────────────
-      /* Each word is scored on how close the camera's orbit angle is to that
-         word's anchor, wrapped to +/-PI so the fade is symmetric and
-         continuous across the 0/2PI seam. The window is wider than the 90
-         degree spacing, so consecutive words overlap and CROSSFADE as you
-         scroll rather than popping on and off.
-
-         A global envelope then fades the whole set in at the very start and
-         out over the last fifth of the rotation. Without it the 360 degree
-         loop would swing DESIGN back into view at the end, and the words
-         would still be on screen when the ascent begins. */
       if (r.turnWords.length) {
-        /* Each word owns exactly ONE quarter turn. `d` is how far the camera
-           has swept PAST that word's anchor, so q is 0..1 across its own
-           quarter. Deliberately NOT wrapped to [-PI, PI]: the orbit sweeps
-           0 -> 2PI monotonically, and wrapping made the last quarter read as
-           only 60deg from DESIGN's anchor, swinging DESIGN back on screen
-           underneath TO ACCOMPLISH. */
+
         const QUARTER = Math.PI / 2
         const rotP = clamp01(s / TL.rotate.end)
         const envelope =
@@ -1327,19 +1124,13 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           }
 
           const q = (orbitAngle - tw.angle) / QUARTER
-          // Slight bleed past both ends so consecutive words kiss rather than
-          // leaving a dead frame between them.
+
           if (q < -0.1 || q > 1.12) {
             tw.mat.opacity = 0
             tw.group.visible = false
             return
           }
 
-          /* Tightened so a parked word is only on screen while the camera is
-             actually near its anchor. Now that words no longer ride the
-             camera, a wide window let one linger until it had slid 35deg
-             off-axis toward the frame edge; this keeps the worst case at
-             ~30deg while still leaving no dead frames between words. */
           const fadeIn = easeOutCubic(clamp01((q + 0.1) / 0.16))
           const fadeOut = 1 - easeInCubic(clamp01((q - 0.7) / 0.22))
           const show = fadeIn * fadeOut * envelope
@@ -1349,54 +1140,26 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
 
           tw.mat.opacity = show * 0.97
 
-          /* The word rides the camera exactly (a === orbitAngle) and is placed
-             on the OPPOSITE side of the origin, so it is always dead centre
-             and always behind the jellyfish. Pinning it to a fixed azimuth
-             instead let it drift to the frame edge while still fully opaque.
-             The motion is therefore vertical: it rises from below as it fades
-             in and sinks away as it leaves. */
-          /* FIXED ON SCREEN — the word does not translate at all.
-             It is placed on the camera's own sight line, just beyond the
-             look-at point, so it projects to exactly the same pixel every
-             frame: dead centre, directly behind the jellyfish. It appears and
-             disappears in place by opacity alone.
-
-             Two earlier attempts both read as "moving with the screen":
-               1. pinned to a fixed WORLD angle — the camera then swept past
-                  it and it slid off toward the frame edge (measured 35deg
-                  off-axis before it faded);
-               2. riding the camera but ALSO animating a rise and a recede —
-                  up to 2.6 units of depth and 1.45 of vertical travel, which
-                  is plenty to read as the text drifting.
-             Deriving the position from camPos/camLook (rather than an azimuth)
-             also keeps it centred under the hero parallax offsets, which a
-             bare atan2 on the camera azimuth does not. */
           _wordDir.copy(camLook).sub(camPos).normalize()
           tw.group.position.copy(camLook).addScaledVector(_wordDir, TURN_WORD_RADIUS)
-          // Face the camera square-on.
+
           tw.group.rotation.y = Math.atan2(-_wordDir.x, -_wordDir.z)
           tw.group.scale.setScalar(1)
         })
       }
 
-      // ── Rings ────────────────────────────────────────────────────────────
       r.rings.forEach((ring) => {
         const d = camPos.y - ring.y
-        /* The label fade must be narrower than the ring SPACING, or several
-           bands are legible at once and their text overlaps into mush. The
-           rings now sit 3.4 apart (one tight "projects" section), so a 12-unit
-           falloff had three labels competing; 2.2 means a band is essentially
-           only readable while it is the one being approached. */
+
         const near = clamp01(1 - Math.abs(d) / 2.2)
         ring.group.rotation.z = t * ring.spin + ring.index * 0.7
         ring.group.position.y = ring.y + Math.sin(t * 1.1 + ring.index * 1.5) * 0.12
 
         const bandMat = ring.band.material as THREE.MeshBasicMaterial
-        // Softer: supporting texture, not competing with the DOM label card.
+
         bandMat.opacity = easeOutCubic(near) * 0.6
         if (bandMat.map) bandMat.map.offset.x = (t * 0.035 + ring.index * 0.25) % 1
 
-        // Flare as the jellyfish passes through the hoop.
         const through = clamp01(1 - Math.abs(jellyGroup.position.y - ring.y) / 2.6)
         const glowMat = ring.glow.material as THREE.MeshBasicMaterial
         glowMat.opacity = easeOutCubic(through) * 0.32
@@ -1404,25 +1167,14 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         ring.group.scale.setScalar(lerp(ring.group.scale.x, pop, DAMP(0.12)))
       })
 
-      // ── Shard physics ────────────────────────────────────────────────────
       const m3 = r.mouse3D
       r.shards.forEach((item) => {
         if (!entered) {
-          /* Breathing rides ALONG THE NORMAL so plates slide radially and stay
-             overlapped. Crucially the phase is GLOBAL, not per-plate: with
-             `item.phase` in here every plate sat at a different radius at any
-             instant (measured: 153 distinct radii across 195 plates), so the
-             sphere was never actually symmetric even though it is built that
-             way. One shared phase makes the whole shell inhale and exhale as
-             a single rigid body. */
+
           item.target
             .copy(item.home)
             .addScaledVector(item.normal, Math.sin(t * 0.75) * 0.028)
 
-          /* Fly-in: before the orb is formed each plate is pushed out along its
-             own scatter vector, so they converge from all directions. Staggered
-             per plate (by its hash phase) so the shell knits together rather
-             than snapping shut all at once. */
           if (r.assemble < 1) {
             const stagger = clamp01((item.phase / (Math.PI * 2)) * 0.45)
             const local = clamp01((r.assemble - stagger) / (1 - stagger || 1))
@@ -1434,11 +1186,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
             _shardWorld.copy(item.home).applyMatrix4(worldGroup.matrixWorld)
             const dist = _shardWorld.distanceTo(m3)
             if (dist < HOVER_RADIUS) {
-              /* The cursor presses the shell INWARD along each plate's own
-                 normal. An outward push would fan the plates apart and let
-                 daylight — and the jellyfish — through the gaps; denting
-                 inward can only ever increase overlap, so the shell stays
-                 provably sealed while still feeling soft and reactive. */
+
               const f = Math.pow(1 - dist / HOVER_RADIUS, 1.5)
               item.target.addScaledVector(item.normal, -HOVER_DEPTH * f)
             }
@@ -1446,19 +1194,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           if (hold > 0.01) item.target.addScaledVector(item.scatter, hold * hold * 0.95)
           item.current.lerp(item.target, DAMP(0.085))
           item.mesh.position.copy(item.current)
-          /* NO accumulated wobble while the shell is intact.
-             This used to be rotateZ(sin(t*0.3 + phase)*0.0007 + hold*spin.z).
-             Because `phase` is a per-plate hash, every plate crept to a
-             DIFFERENT angle over time: the shell is BUILT perfectly symmetric
-             (identical plates, zero tilt, one sphere), but this quietly
-             accumulated a unique rotation on each one, so within seconds the
-             mosaic looked randomly tilted again. That is why the asymmetry
-             kept coming back even after every build-time constant was zeroed.
 
-             Instead: reset to the pristine orientation each frame, then apply
-             a tumble that is a pure FUNCTION of hold. That makes it exactly
-             reversible — at hold 0 the shell is bit-for-bit symmetric, and a
-             partial press-and-release leaves no permanent skew. */
           item.mesh.quaternion.copy(item.baseQuat)
           if (hold > 0.001) {
             const k = hold * hold * 72
@@ -1468,30 +1204,18 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           }
         } else if (item.ambient) {
           if (!item.burstSet) {
-            // Freeze the hand-off point, in camera-local Y.
+
             item.burst.copy(item.current).setY(item.current.y - camPos.y)
             item.burstSet = true
           }
-          /* AMBIENT FIELD.
-             The plate drifts in a tall shell around the camera. Its anchor is
-             expressed RELATIVE to the current camera height, so the field
-             travels with the journey instead of being left behind at the hero
-             once the camera has climbed 47 units. Slow sine drift on all three
-             axes keeps it alive without ever looking like it is orbiting. */
+
           const camY = camPos.y
           item.target.set(
             item.field.x + Math.sin(t * 0.21 + item.phase) * 1.15,
             item.field.y + Math.cos(t * 0.17 + item.phase * 1.3) * 1.4,
             item.field.z + Math.sin(t * 0.13 + item.phase * 0.7) * 1.15
           )
-          /* Settle into the drift pattern in the camera's LOCAL frame, then add
-             the camera height. Lerping the camera-relative offset (rather than
-             the absolute world position) is essential: the camera climbs 39
-             units over the journey, and a 0.018 world-space lerp lagged it by
-             7-14 units — far outside the ~2.7-unit half-view — so the field
-             was left behind and the later sections emptied out. In the local
-             frame the plate tracks the camera exactly and the easing only ever
-             applies to the drift itself. */
+
           item.ease = lerp(item.ease, 1, DAMP(0.018))
           item.current.lerpVectors(item.burst, item.target, item.ease)
           item.mesh.position.set(
@@ -1503,7 +1227,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           item.mesh.rotation.y += item.spin.y * 0.35
           item.mesh.rotation.z += item.spin.z * 0.35
         } else {
-          // Plates not chosen for the field fly out and stay gone.
+
           item.target.copy(item.home).addScaledVector(item.scatter, 1.6)
           item.current.lerp(item.target, DAMP(0.05))
           item.mesh.position.copy(item.current)
@@ -1514,21 +1238,29 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         }
       })
 
-      // ── AURELIA contact scene ────────────────────────────────────────────
       const contactStart = TL.finale.start - 0.02
       const contactActive = entered && s >= contactStart
       contactGroup.visible = contactActive
+      if (!contactActive && r.aureliaFade !== 0) {
+        r.aureliaFade = 0
+        if (r.aureliaMat) r.aureliaMat.opacity = 0
+        if (r.ballMat) r.ballMat.opacity = 0
+      }
 
       if (contactActive) {
         const rise = clamp01((s - contactStart) / 0.12)
         const eased = easeOutCubic(rise)
+
+        const fadeTarget = easeOutCubic(clamp01((s - contactStart) / 0.085))
+        r.aureliaFade = lerp(r.aureliaFade, fadeTarget, DAMP(0.09))
+        if (r.aureliaMat) r.aureliaMat.opacity = r.aureliaFade * 0.96
+        if (r.ballMat) r.ballMat.opacity = r.aureliaFade
 
         contactGroup.position.set(0, WORLD.aureliaY - (1 - eased) * 6.5, 1.4)
         contactGroup.scale.setScalar(lerp(0.9, 1.0, eased))
         contactGroup.rotation.y = lerp(contactGroup.rotation.y, r.plx * 0.3, DAMP(0.06))
         contactGroup.rotation.x = lerp(contactGroup.rotation.x, r.ply * 0.18, DAMP(0.06))
 
-        /* Cursor → world point on the plane of the sculpture. */
         contactGroup.updateMatrixWorld()
         _planeNrm.set(0, 0, 1).applyQuaternion(contactGroup.quaternion)
         _contactPlane.setFromNormalAndCoplanarPoint(_planeNrm, contactGroup.position)
@@ -1553,11 +1285,9 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
             }
           }
 
-          // Idle drift.
           b.vel.y += Math.sin(t * 1.25 + b.phase) * 0.0011
           b.vel.x += Math.cos(t * 0.9 + b.phase) * 0.0008
 
-          // Spring home + damping.
           b.vel.x += (b.home.x - p.x) * 0.052
           b.vel.y += (b.home.y - p.y) * 0.052
           b.vel.z += (b.home.z - p.z) * 0.052

@@ -35,7 +35,7 @@ const CASES: CaseItem[] = [
     gradient: 'linear-gradient(135deg, #e392fe 0%, #74a7fe 100%)',
     accentColor: '#e392fe',
     year: '2025',
-    link: 'https://labs.noomoagency.com/',
+    link: 'https://aureliafortheunhurried.vercel.app',
   },
   {
     id: 'intel-ai',
@@ -50,7 +50,7 @@ const CASES: CaseItem[] = [
     gradient: 'linear-gradient(135deg, #53d5fd 0%, #005a3c 100%)',
     accentColor: '#53d5fd',
     year: '2024',
-    link: 'https://noomoagency.com/',
+    link: 'https://aureliafortheunhurried.vercel.app',
   },
   {
     id: 'silly-bunny',
@@ -65,7 +65,7 @@ const CASES: CaseItem[] = [
     gradient: 'linear-gradient(135deg, #febb25 0%, #ee4d31 100%)',
     accentColor: '#febb25',
     year: '2024',
-    link: 'https://noomoagency.com/',
+    link: 'https://aureliafortheunhurried.vercel.app',
   },
   {
     id: 'aurelia-beat',
@@ -80,7 +80,7 @@ const CASES: CaseItem[] = [
     gradient: 'linear-gradient(135deg, #8231fe 0%, #d357fe 100%)',
     accentColor: '#8231fe',
     year: '2025',
-    link: 'https://labs.noomoagency.com/',
+    link: 'https://aureliafortheunhurried.vercel.app',
   },
   {
     id: 'spatial-vision',
@@ -95,7 +95,7 @@ const CASES: CaseItem[] = [
     gradient: 'linear-gradient(135deg, #00fdff 0%, #1a0a53 100%)',
     accentColor: '#00fdff',
     year: '2025',
-    link: 'https://noomoagency.com/',
+    link: 'https://aureliafortheunhurried.vercel.app',
   },
   {
     id: 'metahuman-fashion',
@@ -110,14 +110,13 @@ const CASES: CaseItem[] = [
     gradient: 'linear-gradient(135deg, #f4a4c0 0%, #942192 100%)',
     accentColor: '#f4a4c0',
     year: '2024',
-    link: 'https://noomoagency.com/',
+    link: 'https://aureliafortheunhurried.vercel.app',
   },
 ]
 
 export function WorkModal({ isOpen, onClose }: WorkModalProps) {
   const [activeFilter, setActiveFilter] = useState<'all' | '3d' | 'xr' | 'ai'>('all')
 
-  // Close on Escape key
   useEffect(() => {
     if (!isOpen) return
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -132,15 +131,14 @@ export function WorkModal({ isOpen, onClose }: WorkModalProps) {
 
   if (!isOpen) return null
 
-  const filteredCases = activeFilter === 'all' 
-    ? CASES 
+  const filteredCases = activeFilter === 'all'
+    ? CASES
     : CASES.filter((c) => c.category === activeFilter)
 
   return (
     <div className="work-editorial-overlay" onClick={onClose}>
       <div className="work-editorial-drawer" onClick={(e) => e.stopPropagation()}>
-        {/* Top Sticky Bar */}
-        <div className="editorial-topbar">
+                <div className="editorial-topbar">
           <div className="topbar-left">
             <span className="mono-tag">[ AURELIA LABS / ARCHIVE ]</span>
             <span className="count-pill">{filteredCases.length} EXPERIENCES</span>
@@ -160,8 +158,7 @@ export function WorkModal({ isOpen, onClose }: WorkModalProps) {
           </button>
         </div>
 
-        {/* Hero Title Section */}
-        <div className="editorial-hero">
+                <div className="editorial-hero">
           <div className="hero-header-line">
             <span className="section-index">[ 01 / PORTFOLIO ]</span>
             <div className="filter-pill-group">
@@ -189,16 +186,14 @@ export function WorkModal({ isOpen, onClose }: WorkModalProps) {
           </p>
         </div>
 
-        {/* Projects Grid */}
-        <div className="editorial-work-grid">
+                <div className="editorial-work-grid">
           {filteredCases.map((item, idx) => (
             <div
               key={item.id}
               className="editorial-work-card"
               onMouseEnter={() => sound.playClick(1350)}
             >
-              {/* Card Media Preview */}
-              <div className="card-media-wrapper" style={{ background: item.gradient }}>
+                            <div className="card-media-wrapper" style={{ background: item.gradient }}>
                 <div className="card-media-overlay" />
                 <div className="card-badge-top">
                   <span className="award-badge">{item.awards[0]}</span>
@@ -210,8 +205,7 @@ export function WorkModal({ isOpen, onClose }: WorkModalProps) {
                 <div className="card-media-shimmer" />
               </div>
 
-              {/* Card Meta Content */}
-              <div className="card-content">
+                            <div className="card-content">
                 <div className="card-category-row">
                   <span className="mono-num">0{idx + 1}</span>
                   <span className="category-name">{item.categoryLabel}</span>
@@ -245,8 +239,7 @@ export function WorkModal({ isOpen, onClose }: WorkModalProps) {
           ))}
         </div>
 
-        {/* Editorial Footer */}
-        <div className="editorial-drawer-footer">
+                <div className="editorial-drawer-footer">
           <div className="footer-left">
             <span>© 2026 AURELIA LABS</span>
             <span className="dot">•</span>

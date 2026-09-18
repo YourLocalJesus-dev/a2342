@@ -8,7 +8,6 @@ import { sound } from './components/AudioEngine'
 import { ScrollNarrative } from './components/ScrollNarrative'
 import { scrollStore } from './scroll'
 
-// The 36 authentic curated color swatches matching Noomo Labs
 const PALETTE_COLORS = [
   '#000000', '#0433FF', '#1A0A53', '#942192', '#791A3E', '#5C0000',
   '#EE4D31', '#FEBB25', '#005819', '#444444', '#53D5FD', '#8231FE',
@@ -27,56 +26,40 @@ const DEFAULT_JELLY_CONFIG: JellyConfig = {
 }
 
 function App() {
-  // Preloader & Experience state
+
   const [loadPercentage, setLoadPercentage] = useState(0)
   const [isPreloaderDone, setIsPreloaderDone] = useState(false)
   const [isTransitionOpened, setIsTransitionOpened] = useState(false)
-  /* True once the shards have swarmed into the orb and the camera has
-     finished its dolly. The click-and-hold UI is gated on THIS, not on
-     isTransitionOpened, so the interface arrives as the orb closes instead
-     of hanging in space over an empty scene while the shards fly in. */
+
   const [isAssembled, setIsAssembled] = useState(false)
 
-  // Enter Experience / Click & Hold State
   const [isEntered, setIsEntered] = useState(false)
   const [holdProgress, setHoldProgress] = useState(0)
   const [isHolding, setIsHolding] = useState(false)
   const holdRafRef = useRef<number | null>(null)
   const holdStartTimeRef = useRef<number>(0)
 
-  // Navigation & Modals
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isWorkOpen, setIsWorkOpen] = useState(false)
   const [isContactOpen, setIsContactOpen] = useState(false)
 
-  // Audio State
   const [isSoundOn, setIsSoundOn] = useState(true)
 
-  // Scroll audio cue tracking (visual scroll lives in the shared scrollStore)
   const lastScrollCueRef = useRef(0)
 
-  // Custom Magnetic Cursor
-  /* The cursor is driven IMPERATIVELY through a ref. It used to be React
-     state written on every mousemove, which re-rendered the entire app —
-     canvas wrapper and all — hundreds of times a second. That is what made
-     the cursor lag, stutter and feel "buggy": it was always a few frames
-     behind the real pointer. Now the transform is written straight to the
-     node inside a rAF, so it tracks perfectly and costs no renders. */
   const cursorRef = useRef<HTMLDivElement | null>(null)
   const cursorTargetRef = useRef({ x: -100, y: -100 })
   const cursorRafRef = useRef<number | null>(null)
   const [cursorText, setCursorText] = useState('')
   const [isCursorDiff, setIsCursorDiff] = useState(false)
   const [isCursorExpanded, setIsCursorExpanded] = useState(false)
-  // Shrinks the expanded ring over small controls (customize widget).
+
   const [isCursorSmall, setIsCursorSmall] = useState(false)
 
-  // Customize Me Widget State
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false)
   const [customizeTab, setCustomizeTab] = useState<'color1' | 'color2' | 'pattern1' | 'pattern2'>('color1')
   const [jellyConfig, setJellyConfig] = useState<JellyConfig>(DEFAULT_JELLY_CONFIG)
 
-  // Preloader Counter Simulation
   useEffect(() => {
     let current = 0
     const interval = setInterval(() => {
@@ -96,7 +79,6 @@ function App() {
     return () => clearInterval(interval)
   }, [])
 
-  // Auto-unlock audio on user interaction
   useEffect(() => {
     const unlockAudio = () => {
       sound.initCtx()
@@ -113,18 +95,15 @@ function App() {
     }
   }, [])
 
-  // Start Experience Click Handler
   const handleStartExperience = () => {
     sound.playStartChime()
     setIsTransitionOpened(true)
-    // Rising sweep that runs underneath the shard fly-in.
+
     sound.playAssembleSweep()
-    /* Must stay in lockstep with ASSEMBLE_MS in JellyCanvas. A shade longer so
-       the UI lands just after the last plate seats, never before. */
+
     window.setTimeout(() => setIsAssembled(true), 3750)
   }
 
-  // Lock scrolling before holding to enter
   useEffect(() => {
     if (!isEntered) {
       document.body.style.overflow = 'hidden'
@@ -143,9 +122,6 @@ function App() {
     }
   }, [isEntered])
 
-  // =========================================================================
-  // CLICK AND HOLD INTERACTION
-  // =========================================================================
   const enterExperience = () => {
     if (isEntered) return
     setIsEntered(true)
@@ -153,14 +129,12 @@ function App() {
     setHoldProgress(1)
     sound.playHoldBurst()
     document.body.style.overflow = 'auto'
-    /* The "CLICK AND HOLD" label is set by the canvas hover test, which only
-       re-runs on mouse MOVE. Entering without moving the mouse would leave the
-       label stuck on screen, so clear it explicitly here. */
+
     resetCursor()
   }
 
   useEffect(() => {
-    // Ignore press-and-hold until the orb exists to be held.
+
     if (isEntered || !isTransitionOpened || !isAssembled) return
 
     const handleDown = (e: MouseEvent | TouchEvent) => {
@@ -178,7 +152,7 @@ function App() {
 
       const tickHold = () => {
         const elapsed = performance.now() - holdStartTimeRef.current
-        const p = Math.min(elapsed / 1300, 1) // 1.3 seconds hold
+        const p = Math.min(elapsed / 1300, 1)
 
         setHoldProgress(p)
         sound.updateHoldProgress(p)
@@ -200,7 +174,6 @@ function App() {
       setIsHolding(false)
       sound.stopHoldCharge()
 
-      // Smooth decay
       const decay = () => {
         setHoldProgress((prev) => {
           if (prev <= 0.03) return 0
@@ -225,8 +198,6 @@ function App() {
     }
   }, [isEntered, isTransitionOpened, isAssembled])
 
-  // Hand the scroll track over to the shared eased scroll store once the
-  // experience is entered, and ride it for the audio swoosh cues.
   useEffect(() => {
     if (!isEntered) {
       scrollStore.reset()
@@ -242,9 +213,8 @@ function App() {
     })
   }, [isEntered])
 
-  // Custom Cursor Mouse Listener with Automatic Hover Detection
   useEffect(() => {
-    // rAF loop: coalesces many mousemoves into one write per frame.
+
     const tick = () => {
       const el = cursorRef.current
       if (el) {
@@ -261,19 +231,14 @@ function App() {
       const target = e.target as HTMLElement | null
       if (!target) return
 
-      // When hovering text input fields or textarea, hide custom cursor so native I-beam cursor is clear
       if (target.closest('input, textarea')) {
         setIsCursorExpanded(false)
         setCursorText('')
         return
       }
 
-      /* The customize widget is a dense cluster of small swatches and icon
-         buttons; the full-size ring would cover the very control being
-         aimed at, so the cursor goes compact anywhere inside it. */
       setIsCursorSmall(!!target.closest('.social-links-global-parent'))
 
-      // Check [data-cursor]
       const cursorTarget = target.closest('[data-cursor]') as HTMLElement | null
       if (cursorTarget) {
         const val = cursorTarget.getAttribute('data-cursor') || ''
@@ -283,7 +248,6 @@ function App() {
         return
       }
 
-      // If hovering over buttons or links without custom cursor text, give slight expansion
       if (target.closest('button, a, .clickable, .tab-btn, .color, .send, .volume')) {
         if (!cursorText) {
           setIsCursorExpanded(true)
@@ -310,23 +274,19 @@ function App() {
     setIsCursorDiff(false)
   }
 
-  // Audio Toggle
   const handleToggleSound = () => {
     const next = sound.toggleSound()
     setIsSoundOn(next)
   }
 
-  // Reset Jelly Config to Defaults
   const handleResetJelly = () => {
     sound.playBubble(700)
     setJellyConfig(DEFAULT_JELLY_CONFIG)
   }
 
-
   return (
     <div className="aurelia-app">
-      {/* Custom Cursor */}
-      <div
+            <div
         id="cursor"
         ref={cursorRef}
         className={`${isCursorDiff ? 'dif' : ''} ${isCursorExpanded ? 'expanded' : ''} ${isCursorSmall ? 'small' : ''}`}
@@ -338,21 +298,18 @@ function App() {
         </div>
       </div>
 
-      {/* Circle Wipe Transition */}
-      <div className={`transition-component ${isTransitionOpened ? 'is-opened' : ''}`}>
+            <div className={`transition-component ${isTransitionOpened ? 'is-opened' : ''}`}>
         <div className="wrapper">
           <h1 className="logo-text">Aurelia Labs</h1>
         </div>
         <div className="dots" />
       </div>
 
-      {/* Preloader */}
-      <div className={`home-preloader ${isPreloaderDone ? 'is-done' : ''} ${isTransitionOpened ? 'is-hidden' : ''}`}>
+            <div className={`home-preloader ${isPreloaderDone ? 'is-done' : ''} ${isTransitionOpened ? 'is-hidden' : ''}`}>
         <div className="top" />
 
         <div className="center">
-          {/* Active Loading State */}
-          <div className="loading">
+                    <div className="loading">
             <p>Loading</p>
           </div>
 
@@ -374,8 +331,7 @@ function App() {
             </p>
           </div>
 
-          {/* Morph to IMMERSE ME IN [START] State */}
-          <div className="done">
+                    <div className="done">
             <div className="text text-1">
               <p>Immerse</p>
             </div>
@@ -436,8 +392,7 @@ function App() {
         </div>
       </div>
 
-      {/* Fixed Header (Reveals only after immersing into experience) */}
-      <header className={isEntered ? 'is-visible' : ''}>
+            <header className={isEntered ? 'is-visible' : ''}>
         <div className="header">
           <div
             className="header-logo"
@@ -470,17 +425,17 @@ function App() {
             </a>
 
             <a
-              href="https://noomoagency.com/?ref=labs"
+              href="https://aureliafortheunhurried.vercel.app"
               target="_blank"
               rel="noreferrer"
               onClick={() => sound.playClick(1100)}
               onMouseEnter={() => {
                 sound.playClick(950)
-                setCursorHover('AGENCY', true)
+                setCursorHover('STUDIO', true)
               }}
               onMouseLeave={resetCursor}
             >
-              [<span>Aurelia Agency</span>]
+              [<span>Aurelia Studio</span>]
             </a>
 
             <a
@@ -499,8 +454,7 @@ function App() {
               [<span>Contact</span>]
             </a>
 
-            {/* Hamburger Switch */}
-            <div
+                        <div
               className={`menu-switch ${isMobileMenuOpen ? 'active' : ''}`}
               onClick={() => {
                 sound.playClick(1000)
@@ -517,8 +471,7 @@ function App() {
               <span className="el el-4">]</span>
             </div>
 
-            {/* Mobile Menu Drawer */}
-            <div className={`mobile-menu ${isMobileMenuOpen ? 'active' : ''}`}>
+                        <div className={`mobile-menu ${isMobileMenuOpen ? 'active' : ''}`}>
               <div className="top">
                 <a
                   href="#"
@@ -539,12 +492,12 @@ function App() {
                   [<span>Work</span>]
                 </a>
                 <a
-                  href="https://noomoagency.com/?ref=labs"
+                  href="https://aureliafortheunhurried.vercel.app"
                   target="_blank"
                   rel="noreferrer"
                   onClick={() => setIsMobileMenuOpen(false)}
                 >
-                  [<span>Aurelia Agency</span>]
+                  [<span>Aurelia Studio</span>]
                 </a>
                 <a
                   href="#"
@@ -566,21 +519,17 @@ function App() {
         </div>
       </header>
 
-
-      {/* Hero Studio Identity & Crazy Animated Accolades */}
-      <div className={`hero-giant-title ${isEntered ? 'is-hidden' : ''} ${isAssembled ? '' : 'is-preload'}`}>
+            <div className={`hero-giant-title ${isEntered ? 'is-hidden' : ''} ${isAssembled ? '' : 'is-preload'}`}>
         <div className="hero-studio-container">
-          
-          {/* Top Studio Prestige Tag */}
-          <div className="hero-studio-badge">
+
+                    <div className="hero-studio-badge">
             <span className="live-dot" />
             <span className="badge-text">DIGITAL INNOVATION &amp; SPATIAL DESIGN ATELIER</span>
             <span className="badge-sep">/</span>
             <span className="badge-status">ACCEPTING Q3–Q4 COMMISSIONS</span>
           </div>
 
-          {/* Main Giant Studio Title with Staggered Characters */}
-          <div className="hero-title-wrap">
+                    <div className="hero-title-wrap">
             <h1 className="hero-title-text" aria-label="AURELIA LABS">
               <span className="char">A</span>
               <span className="char">U</span>
@@ -597,8 +546,7 @@ function App() {
             </h1>
           </div>
 
-          {/* Studio Pitch & Accolades */}
-          <div className="hero-studio-pitch">
+                    <div className="hero-studio-pitch">
             <p className="pitch-primary">
               WE ARCHITECT HYPER-SENSORY 3D DIGITAL WORLDS, SPATIAL COMPUTING &amp; LUXURY EXPERIENCES
             </p>
@@ -607,8 +555,7 @@ function App() {
             </p>
           </div>
 
-          {/* Floating Studio Capability Pills (Left & Right Flanks) */}
-          <div className="hero-floating-pills">
+                    <div className="hero-floating-pills">
             <div
               className="hero-pill pill-left"
               onClick={() => {
@@ -645,14 +592,13 @@ function App() {
         </div>
       </div>
 
-      {/* 3D WebGL Canvas with Faceted Chrome Sphere & Jellyfish */}
-      <JellyCanvas
+            <JellyCanvas
         config={jellyConfig}
         holdProgress={holdProgress}
         isEntered={isEntered}
         isTransitionOpened={isTransitionOpened}
         onHoverModel={(isHovering) => {
-          // Only offer the affordance once the orb is actually assembled.
+
           if (!isEntered && isAssembled) {
             setIsCursorExpanded(isHovering)
             setCursorText(isHovering ? 'CLICK AND HOLD' : '')
@@ -660,8 +606,7 @@ function App() {
         }}
       />
 
-      {/* Hero Bottom Bar: ARE YOU READY TO STEP INTO THE FUTURE? + Progress Fill */}
-      <div className={`hero-bottom-bar ${isEntered ? 'is-hidden' : ''} ${isAssembled ? 'is-visible' : ''}`}>
+            <div className={`hero-bottom-bar ${isEntered ? 'is-hidden' : ''} ${isAssembled ? 'is-visible' : ''}`}>
         <div className="bottom-row">
           <span className="tagline">ARE YOU READY TO STEP INTO THE FUTURE?</span>
           <div className="right-hold-group">
@@ -676,23 +621,13 @@ function App() {
         </div>
       </div>
 
-      {/* ==================================================================
-          THE SCROLL NARRATIVE
-            00–30%  ROTATE · the world turns, four words rise from below
-            30–58%  ASCEND · the jellyfish climbs past 3D word sculptures
-            58–82%  WORK   · four rotating glass project rings
-            82–100% ARRIVE · camera detaches and settles on AURELIA
-          ================================================================== */}
-      <ScrollNarrative isEntered={isEntered} />
+            <ScrollNarrative isEntered={isEntered} />
 
-
-      {/* 10,000px Virtual Scroll Track & Footer (ONLY rendered when entered) */}
-      {isEntered && (
+            {isEntered && (
         <>
           <div className="home-page" />
 
-          {/* Frosted Glass Footer */}
-          <div className="home-footer">
+                    <div className="home-footer">
             <div className="wrapper">
               <h4>Let's innovate together</h4>
 
@@ -763,11 +698,9 @@ function App() {
         </>
       )}
 
-      {/* Fixed Bottom UI Controls */}
-      <div className={`social-links-global-parent ${isAssembled ? 'is-visible' : ''}`}>
+            <div className={`social-links-global-parent ${isAssembled ? 'is-visible' : ''}`}>
         <div className="social-links-global">
-          {/* Bottom Left Volume Toggle */}
-          <div
+                    <div
             className="volume"
             onClick={handleToggleSound}
             onMouseEnter={() => {
@@ -787,8 +720,7 @@ function App() {
             <div className="back-right" />
           </div>
 
-          {/* Bottom Right "Customize Me" AR / Jelly Widget */}
-          <div
+                    <div
             className={`ar-mode ${isCustomizeOpen ? 'active' : ''}`}
             onMouseEnter={() => {
               if (!isCustomizeOpen) {
@@ -805,8 +737,7 @@ function App() {
           >
             <img alt="icon" className="jel-icon" src="/images/icons/JelIcon.svg" />
 
-            {/* Expanded Options Drawer */}
-            <div className="options-menu">
+                        <div className="options-menu">
               {customizeTab === 'color1' && (
                 <div className="colors">
                   {PALETTE_COLORS.map((hex) => (
@@ -878,8 +809,7 @@ function App() {
               )}
             </div>
 
-            {/* Selected Menu Tabs Bar */}
-            <div className="selected-menu">
+                        <div className="selected-menu">
               <div className="top">
                 <div className="options">
                   <div
@@ -940,8 +870,7 @@ function App() {
         </div>
       </div>
 
-      {/* Interactive Work & Contact Modals */}
-      <WorkModal isOpen={isWorkOpen} onClose={() => setIsWorkOpen(false)} />
+            <WorkModal isOpen={isWorkOpen} onClose={() => setIsWorkOpen(false)} />
       <ContactModal isOpen={isContactOpen} onClose={() => setIsContactOpen(false)} />
     </div>
   )

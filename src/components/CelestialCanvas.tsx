@@ -41,7 +41,6 @@ export function CelestialCanvas() {
     window.addEventListener('mousemove', onMouseMove)
     document.body.addEventListener('mouseleave', onMouseLeave)
 
-    // Orbital particles
     const ringParticles = Array.from({ length: 40 }, (_, i) => ({
       angle: (i / 40) * Math.PI * 2,
       radiusRatio: 0.95 + Math.random() * 0.25,
@@ -55,7 +54,6 @@ export function CelestialCanvas() {
       const w = rect.width
       const h = rect.height
 
-      // Completely clear canvas with full transparency
       ctx.clearRect(0, 0, w, h)
 
       mouse.current.x += (mouse.current.targetX - mouse.current.x) * 0.06
@@ -67,7 +65,6 @@ export function CelestialCanvas() {
       const cy = h / 2 + mouse.current.y * 20
       const radius = Math.min(w, h) * 0.36 + Math.sin(time * 1.5) * 3
 
-      // 1. Soft spherical glow (contained strictly within radial bounds)
       const glow = ctx.createRadialGradient(cx, cy, radius * 0.8, cx, cy, radius * 1.25)
       glow.addColorStop(0, 'rgba(255, 252, 198, 0.3)')
       glow.addColorStop(0.5, 'rgba(218, 155, 121, 0.1)')
@@ -78,7 +75,6 @@ export function CelestialCanvas() {
       ctx.arc(cx, cy, radius * 1.25, 0, Math.PI * 2)
       ctx.fill()
 
-      // 2. Main Spherical Body
       const lightX = cx - radius * 0.35 + mouse.current.x * 15
       const lightY = cy - radius * 0.4 + mouse.current.y * 15
 
@@ -106,7 +102,6 @@ export function CelestialCanvas() {
       ctx.fillStyle = sphereGrad
       ctx.fill()
 
-      // Internal fluid refraction wave inside the clipped sphere
       ctx.globalCompositeOperation = 'screen'
       ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'
       ctx.beginPath()
@@ -123,7 +118,6 @@ export function CelestialCanvas() {
 
       ctx.restore()
 
-      // 3. Ethereal orbital ring
       ctx.save()
       ctx.translate(cx, cy)
       ctx.rotate(-0.55 + mouse.current.x * 0.08)
@@ -135,7 +129,6 @@ export function CelestialCanvas() {
       ctx.lineWidth = 1.5
       ctx.stroke()
 
-      // Ring orbital particle glints
       ringParticles.forEach((p) => {
         p.angle += p.speed
         const px = Math.cos(p.angle) * radius * p.radiusRatio

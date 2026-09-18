@@ -28,8 +28,7 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
   return (
     <div className="story-modal-overlay" onClick={onClose} data-cursor="CLOSE">
       <div className="story-modal-container about-aurelia-modal" onClick={(e) => e.stopPropagation()} data-cursor="READ">
-        {/* Modal Top Bar */}
-        <div className="modal-header">
+                <div className="modal-header">
           <div className="modal-badge">
             <span className="badge-dot" />
             <span>STUDIO MONOGRAPH · ABOUT AURELIA</span>
@@ -48,8 +47,7 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
           </button>
         </div>
 
-        {/* Modal Body */}
-        <div className="modal-body">
+                <div className="modal-body">
           <div className="modal-hero-title">
             <span className="modal-chapter-tag">AN INDEPENDENT DESIGN PRACTICE · EST. 2024</span>
             <h2>
@@ -61,8 +59,7 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
             </p>
           </div>
 
-          {/* Core Studio Pillars */}
-          <div className="about-pillars-grid">
+                    <div className="about-pillars-grid">
             <div className="about-pillar-card">
               <span className="pillar-num">01</span>
               <h3>Spatial Poetics</h3>
@@ -88,16 +85,14 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
             </div>
           </div>
 
-          {/* Quote Banner */}
-          <div className="about-quote-box">
+                    <div className="about-quote-box">
             <blockquote>
               “Design is not merely a problem solved. It is an enduring atmosphere that lingers long after you leave the room.”
             </blockquote>
             <span className="quote-author">— Aurelia Creative Direction Ethos</span>
           </div>
 
-          {/* Atelier Studios & Coordinates */}
-          <div className="metrics-grid">
+                    <div className="metrics-grid">
             <div className="metric-box">
               <span className="m-num">TOKYO</span>
               <span className="m-label">Sanctuary & Woodcraft Lab</span>
@@ -116,8 +111,7 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
             </div>
           </div>
 
-          {/* Modal Footer */}
-          <div className="modal-footer">
+                    <div className="modal-footer">
             <span className="footer-origin">AURELIA ATELIER · MMXXVI</span>
             <button
               type="button"

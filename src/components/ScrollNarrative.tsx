@@ -1,15 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { scrollStore, TL, PROJECTS, clamp01, norm, easeOutExpo, easeOutCubic } from '../scroll'
 
-/* ==========================================================================
-   ScrollNarrative — every overlay that rides the scroll timeline.
-
-   This writes directly to style properties inside a rAF subscription rather
-   than through React state. Re-rendering a tree on every frame is what makes
-   scroll-driven typography feel gummy; mutating transforms keeps it glued to
-   the WebGL camera, which is reading from the very same eased value.
-   ========================================================================== */
-
 interface Props {
   isEntered: boolean
 }
@@ -37,16 +28,13 @@ export function ScrollNarrative({ isEntered }: Props) {
 
     let lastRing = -1
 
-    /* The narrative is pinned to the viewport while the footer scrolls up over
-       it. Fade the whole layer out across the last stretch of the track so the
-       HUD never sits on top of the footer. */
     let footerFade = 1
     const updateFooterFade = () => {
       const footer = document.querySelector<HTMLElement>('.home-footer')
       if (!footer) return
       const top = footer.getBoundingClientRect().top
       const vh = window.innerHeight
-      // 1 while the footer is below the fold, 0 once it covers the top third.
+
       footerFade = clamp01((top - vh * 0.35) / (vh * 0.4))
       root.style.opacity = String(footerFade)
       root.style.visibility = footerFade < 0.01 ? 'hidden' : 'visible'
@@ -56,7 +44,7 @@ export function ScrollNarrative({ isEntered }: Props) {
     updateFooterFade()
 
     const unsub = scrollStore.subscribe((s, vel) => {
-      /* ── Phase 2: ascent captions ──────────────────────────────────────── */
+
       ascentEls.forEach((el) => {
         const a = parseFloat(el.dataset.start || '0')
         const b = parseFloat(el.dataset.end || '1')
@@ -74,7 +62,6 @@ export function ScrollNarrative({ isEntered }: Props) {
         el.style.filter = `blur(${((1 - inP) * 8 + outP * 6).toFixed(2)}px)`
       })
 
-      /* ── Phase 3: the glass rings HUD ──────────────────────────────────── */
       const inRings = s >= TL.rings.start - 0.03 && s <= TL.rings.end + 0.02
       if (ringHud) {
         const fade =
@@ -104,7 +91,6 @@ export function ScrollNarrative({ isEntered }: Props) {
         })
       }
 
-      /* ── Phase 4: finale caption under AURELIA ─────────────────────────── */
       if (finale) {
         const p = norm(s, TL.finale.start + 0.06, TL.finale.start + 0.2)
         const e = easeOutExpo(p)
@@ -114,7 +100,6 @@ export function ScrollNarrative({ isEntered }: Props) {
         finale.style.filter = `blur(${((1 - e) * 10).toFixed(2)}px)`
       }
 
-      /* ── Persistent HUD ────────────────────────────────────────────────── */
       if (progressFill) progressFill.style.transform = `scaleY(${Math.max(s, 0.004).toFixed(4)})`
       if (progressLabel) progressLabel.textContent = `${String(Math.round(s * 100)).padStart(2, '0')}`
 
@@ -122,7 +107,6 @@ export function ScrollNarrative({ isEntered }: Props) {
         s < TL.rotate.end ? 0 : s < TL.ascend.end ? 1 : s < TL.rings.end ? 2 : 3
       chapterEls.forEach((el, i) => el.classList.toggle('is-active', i === chapter))
 
-      // Motion-reactive stretch on the HUD rule.
       if (progressFill) {
         progressFill.style.filter = `brightness(${(1 + Math.abs(vel) * 14).toFixed(3)})`
       }
@@ -139,12 +123,8 @@ export function ScrollNarrative({ isEntered }: Props) {
 
   return (
     <div className="scroll-narrative" ref={rootRef}>
-      {/* PHASE 1 rotation words are 3D meshes inside the WebGL scene — they
-          orbit behind the jellyfish and crossfade with camera angle, so there
-          is no DOM layer for them here. */}
 
-      {/* ── PHASE 2 · ASCENT CAPTIONS ───────────────────────────────────── */}
-      <div
+            <div
         className="ks-ascent ks-ascent-left"
         data-ascent
         data-side="left"
@@ -176,8 +156,7 @@ export function ScrollNarrative({ isEntered }: Props) {
         </p>
       </div>
 
-      {/* ── PHASE 3 · GLASS RING HUD ────────────────────────────────────── */}
-      <div className="ks-rings-hud" data-ring-hud style={{ visibility: 'hidden' }}>
+            <div className="ks-rings-hud" data-ring-hud style={{ visibility: 'hidden' }}>
         <div className="ks-rings-inner">
           <div className="ks-rings-counter">
             <span data-ring-counter>01</span>
@@ -196,14 +175,12 @@ export function ScrollNarrative({ isEntered }: Props) {
         </div>
       </div>
 
-      {/* ── PHASE 4 · FINALE ────────────────────────────────────────────── */}
-      <div className="ks-finale" data-finale style={{ visibility: 'hidden' }}>
+            <div className="ks-finale" data-finale style={{ visibility: 'hidden' }}>
         <span className="ks-finale-rule" />
         <p>Immersive experiences, engineered end to end.</p>
       </div>
 
-      {/* ── PERSISTENT HUD ──────────────────────────────────────────────── */}
-      <div className="ks-hud">
+            <div className="ks-hud">
         <div className="ks-hud-chapters">
           {['ROTATE', 'ASCEND', 'WORK', 'ARRIVE'].map((c) => (
             <span className="ks-hud-chapter" data-chapter key={c}>

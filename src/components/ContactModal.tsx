@@ -24,7 +24,6 @@ export function ContactModal({ isOpen, onClose }: ContactModalProps) {
     message: '',
   })
 
-  // Escape key support
   useEffect(() => {
     if (!isOpen) return
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -53,8 +52,7 @@ export function ContactModal({ isOpen, onClose }: ContactModalProps) {
   return (
     <div className="contact-editorial-overlay" onClick={onClose}>
       <div className="contact-editorial-drawer" onClick={(e) => e.stopPropagation()}>
-        {/* Top Sticky Bar */}
-        <div className="editorial-topbar">
+                <div className="editorial-topbar">
           <div className="topbar-left">
             <span className="mono-tag">[ AURELIA LABS / TRANSMISSION ]</span>
             <span className="count-pill">STATUS: ACCEPTING COMMISSIONS</span>
@@ -74,8 +72,7 @@ export function ContactModal({ isOpen, onClose }: ContactModalProps) {
           </button>
         </div>
 
-        {/* Hero Title Section */}
-        <div className="editorial-hero">
+                <div className="editorial-hero">
           <div className="hero-header-line">
             <span className="section-index">[ 02 / COLLABORATE ]</span>
             <span className="location-tag">SAN FRANCISCO · TOKYO · GLOBAL XR</span>
@@ -86,10 +83,8 @@ export function ContactModal({ isOpen, onClose }: ContactModalProps) {
           </p>
         </div>
 
-        {/* Main Content: Two Columns */}
-        <div className="contact-content-grid">
-          {/* Left Column: Direct Info */}
-          <div className="contact-info-col">
+                <div className="contact-content-grid">
+                    <div className="contact-info-col">
             <div className="info-block">
               <span className="info-label">[ DIRECT CONTACT ]</span>
               <a
@@ -117,13 +112,13 @@ export function ContactModal({ isOpen, onClose }: ContactModalProps) {
               <span className="info-label">[ SOCIALS & NETWORK ]</span>
               <div className="social-links-row">
                 <a
-                  href="https://noomoagency.com/?ref=labs"
+                  href="https://aureliafortheunhurried.vercel.app"
                   target="_blank"
                   rel="noreferrer"
                   className="social-tag"
                   onMouseEnter={() => sound.playClick(1100)}
                 >
-                  [ AURELIA AGENCY ]
+                  [ AURELIA STUDIO ]
                 </a>
                 <a
                   href="https://twitter.com"
@@ -155,8 +150,7 @@ export function ContactModal({ isOpen, onClose }: ContactModalProps) {
             </div>
           </div>
 
-          {/* Right Column: Editorial Transmission Form */}
-          <div className="contact-form-col">
+                    <div className="contact-form-col">
             {submitted ? (
               <div className="transmission-success-box">
                 <div className="success-icon-wrap">✓</div>
@@ -256,8 +250,7 @@ export function ContactModal({ isOpen, onClose }: ContactModalProps) {
           </div>
         </div>
 
-        {/* Editorial Footer */}
-        <div className="editorial-drawer-footer">
+                <div className="editorial-drawer-footer">
           <div className="footer-left">
             <span>AURELIA LABS · IMMERSIVE TECHNOLOGIES</span>
             <span className="dot">•</span>

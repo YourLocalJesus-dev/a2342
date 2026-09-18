@@ -7,8 +7,7 @@ export function KineticManifesto() {
 
   return (
     <section className="kinetic scene" aria-label="Presence demands no spectacle. Stillness is pure authority.">
-      {/* Top Header */}
-      <div className="kinetic-top-row">
+            <div className="kinetic-top-row">
         <div className="badge-row">
           <span className="badge-dot" />
           <p className="eyebrow">Chapter 03 · Manifesto</p>
@@ -16,10 +15,8 @@ export function KineticManifesto() {
         <span className="kinetic-serial">MMXXVI · AXIOM</span>
       </div>
 
-      {/* Main Kinetic Typography Stage */}
-      <div className="kinetic-lines">
-        {/* Phase 1 (Visible initially, glides out on scroll) */}
-        <div className="kinetic-phrase phrase-primary">
+            <div className="kinetic-lines">
+                <div className="kinetic-phrase phrase-primary">
           <div className="phrase-row">
             <span
               className="k-word word-1"
@@ -47,8 +44,7 @@ export function KineticManifesto() {
           </div>
         </div>
 
-        {/* Phase 2 (Glides in smoothly on scroll, perfectly centered, never overlaps) */}
-        <div className="kinetic-phrase phrase-secondary">
+                <div className="kinetic-phrase phrase-secondary">
           <div className="phrase-row">
             <span
               className="k-word word-4"
@@ -77,8 +73,7 @@ export function KineticManifesto() {
         </div>
       </div>
 
-      {/* Bottom Status Bar */}
-      <div className="kinetic-bottom-bar">
+            <div className="kinetic-bottom-bar">
         <p className="kinetic-note">Scroll slowly. Let the excess fall away.</p>
         <div className="scroll-indicator-wrap" data-cursor="SCROLL">
           <span className="scroll-txt">SCROLL TO REVEAL</span>

@@ -40,8 +40,7 @@ class SoothingAmbientAudioEngine {
       const channelData = impulse.getChannelData(channel)
       for (let i = 0; i < length; i++) {
         const t = i / length
-        // Smooth, breathy decay rather than harsh noise burst — softened
-        // by squaring the random value toward zero for a gentler tail.
+
         const raw = Math.random() * 2 - 1
         const soft = raw * raw * raw
         channelData[i] = soft * Math.pow(1 - t, decay)
@@ -64,7 +63,6 @@ class SoothingAmbientAudioEngine {
       this.masterGain = this.ctx.createGain()
       this.masterGain.gain.setValueAtTime(0.42, this.ctx.currentTime)
 
-      // Gentle overall lowpass so nothing ever feels bright or brittle.
       this.warmthFilter = this.ctx.createBiquadFilter()
       this.warmthFilter.type = 'lowpass'
       this.warmthFilter.frequency.setValueAtTime(
@@ -84,16 +82,12 @@ class SoothingAmbientAudioEngine {
       this.masterGain.connect(this.warmthFilter)
       this.compressor.connect(this.ctx.destination)
 
-      // Music bus — unchanged routing, just feeds through the warmth filter.
       this.musicGain = this.ctx.createGain()
       this.musicGain.gain.setValueAtTime(0.6, this.ctx.currentTime)
       this.musicGain.connect(this.masterGain)
 
-      // SFX bus splits into a dry path and a reverb-wet path so every
-      // effect gets a soft ambient tail instead of a dry, punchy hit.
       this.sfxGain = this.ctx.createGain()
-      /* Was 0.08, which put every effect around -55dBFS once multiplied by
-         the 0.42 master — technically playing but effectively inaudible. */
+
       this.sfxGain.gain.setValueAtTime(0.26, this.ctx.currentTime)
 
       this.sfxDryGain = this.ctx.createGain()
@@ -193,7 +187,6 @@ class SoothingAmbientAudioEngine {
     filter.frequency.linearRampToValueAtTime(1250, now + 4.2)
     filter.frequency.linearRampToValueAtTime(700, now + duration)
 
-    // Slower, smoother swell in and out — nothing arrives or leaves abruptly.
     voiceGain.gain.setValueAtTime(0.0001, now)
     voiceGain.gain.exponentialRampToValueAtTime(0.16, now + 1.1)
     voiceGain.gain.linearRampToValueAtTime(0.13, now + 4.2)
@@ -221,7 +214,7 @@ class SoothingAmbientAudioEngine {
       if (!this.ctx) return
 
       const oscillator = this.ctx.createOscillator()
-      // Sine throughout for a rounder, breathier tone (triangle voices removed).
+
       oscillator.type = 'sine'
       oscillator.frequency.setValueAtTime(frequency, now)
       oscillator.detune.setValueAtTime(
@@ -251,8 +244,6 @@ class SoothingAmbientAudioEngine {
       )
     }, (duration + 3) * 1000)
 
-    // Chords now overlap more generously (longer gap before the next one
-    // starts fading in), so the wash of sound never has a gap or a seam.
     this.chordTimer = window.setTimeout(() => {
       if (this.isPlayingMusic) {
         this.playNextAmbientChord()
@@ -285,7 +276,6 @@ class SoothingAmbientAudioEngine {
     filter.frequency.setValueAtTime(frequency, now)
     filter.Q.setValueAtTime(4, now)
 
-    // Softer, rounder attack and a longer tail instead of a sharp tick.
     gain.gain.setValueAtTime(0.0001, now)
     gain.gain.exponentialRampToValueAtTime(0.05, now + 0.05)
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.1)
@@ -351,8 +341,6 @@ class SoothingAmbientAudioEngine {
     const filter = this.ctx.createBiquadFilter()
     const gain = this.ctx.createGain()
 
-    // A soft "tap" rather than a bright blip — narrower pitch swing,
-    // gentler edges, and a lowpass to round off any hardness.
     oscillator.type = 'sine'
     oscillator.frequency.setValueAtTime(freq * 1.12, now)
     oscillator.frequency.exponentialRampToValueAtTime(
@@ -415,7 +403,6 @@ class SoothingAmbientAudioEngine {
     const startFrequency = isOpen ? 220 : 600
     const endFrequency = isOpen ? 600 : 220
 
-    // Sine instead of triangle, and a slower sweep for a breath-like feel.
     oscillator.type = 'sine'
     oscillator.frequency.setValueAtTime(90, now)
 
@@ -571,12 +558,6 @@ class SoothingAmbientAudioEngine {
     }, 320)
   }
 
-  /* Fired the instant the hold completes and the shell bursts. This is the
-     single most important sound on the site, so it is a layered hit rather
-     than the thin sine arpeggio that used to live here:
-       1. a low sub thump for physical impact,
-       2. a filtered noise whoosh riding the shards outward,
-       3. a bright major arpeggio that resolves the tension of the charge. */
   public playHoldBurst() {
     this.stopHoldCharge()
     this.initCtx()
@@ -586,7 +567,6 @@ class SoothingAmbientAudioEngine {
     const ctx = this.ctx
     const now = ctx.currentTime
 
-    // ── 1. sub thump ──────────────────────────────────────────────────────
     const sub = ctx.createOscillator()
     const subGain = ctx.createGain()
     sub.type = 'sine'
@@ -600,12 +580,11 @@ class SoothingAmbientAudioEngine {
     sub.start(now)
     sub.stop(now + 1.0)
 
-    // ── 2. noise whoosh ───────────────────────────────────────────────────
     const dur = 1.1
     const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate)
     const data = buf.getChannelData(0)
     for (let i = 0; i < data.length; i++) {
-      // Decaying noise: dense at the burst, thinning as the shards fly out.
+
       data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2)
     }
     const noise = ctx.createBufferSource()
@@ -624,9 +603,8 @@ class SoothingAmbientAudioEngine {
     nGain.connect(this.sfxGain)
     noise.start(now)
 
-    // ── 3. resolving arpeggio ─────────────────────────────────────────────
     const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5]
-    // Local alias: TS loses the null-narrowing of `this.sfxGain` inside the closure.
+
     const bus = this.sfxGain
     notes.forEach((frequency, index) => {
       const oscillator = ctx.createOscillator()
@@ -654,7 +632,6 @@ class SoothingAmbientAudioEngine {
     })
   }
 
-  /* Rising tone while the shards fly in and the camera dollies to the orb. */
   public playAssembleSweep() {
     this.initCtx()
     if (!this.ctx || !this.sfxGain || this.isMuted) return

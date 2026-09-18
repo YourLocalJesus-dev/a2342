@@ -1,7 +1,3 @@
-/* ==========================================================================
-   AURELIA LABS — 1:1 AUTHENTIC NOOMO LABS STYLING & DRUK TYPOGRAPHY
-   ========================================================================== */
-
 @font-face {
   font-display: swap;
   font-family: 'DrukMedium';
@@ -40,7 +36,7 @@
 html {
   font-family: var(--font-body);
   font-size: 16px;
-  /* Refined darker shade of white / titanium gradient with high contrast */
+
   background: linear-gradient(168deg, #cad5e3 0%, #dbe3ed 45%, #c8d3e2 100%);
   background-attachment: fixed;
   overflow-x: hidden;
@@ -59,7 +55,6 @@ body {
   position: relative;
 }
 
-/* Distinct, refined architectural dot grid */
 body::before {
   content: '';
   position: fixed;
@@ -70,22 +65,12 @@ body::before {
   z-index: 1;
 }
 
-
 a,
 button {
   cursor: none;
   text-decoration: none;
 }
 
-
-/* ==========================================================================
-   CUSTOM CURSOR (#cursor)
-   The app renders <div id="cursor"> with .wrapper > .text > p inside, and
-   body sets `cursor: none`. Without these rules the element has no box at
-   all, so the pointer simply vanished. Position is written as a transform
-   from JS, so translate(-50%,-50%) is applied on an inner element instead
-   of here — otherwise it would fight the JS transform every frame.
-   ========================================================================== */
 #cursor {
   position: fixed;
   top: 0;
@@ -121,7 +106,6 @@ button {
     box-shadow 0.3s ease;
 }
 
-/* Centre dot */
 #cursor .wrapper::after {
   content: '';
   position: absolute;
@@ -156,7 +140,6 @@ button {
   transition: opacity 0.26s ease, transform 0.42s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Expanded: a label is showing (e.g. CLICK AND HOLD, VIEW CASE) */
 #cursor.expanded .wrapper {
   width: 92px;
   height: 92px;
@@ -178,10 +161,6 @@ button {
   transform: scale(1);
 }
 
-/* Compact variant. The 92px expanded ring is sized for big hero targets; over
-   the customize widget's small swatches and icon buttons it swallowed the
-   control underneath, so you could not see what you were about to click.
-   `.small` keeps the label but shrinks the ring to fit those targets. */
 #cursor.expanded.small .wrapper {
   width: 46px;
   height: 46px;
@@ -194,7 +173,6 @@ button {
   letter-spacing: 0.02em;
 }
 
-/* Difference blend for dark UI (header links, START) */
 #cursor.dif {
   mix-blend-mode: difference;
 }
@@ -212,7 +190,6 @@ button {
   color: #ffffff;
 }
 
-/* Touch devices have no pointer to replace — restore the native one. */
 @media (pointer: coarse) {
   #cursor {
     display: none;
@@ -367,9 +344,6 @@ button {
   }
 }
 
-/* ==========================================================================
-   PRELOADER (.home-preloader) — AUTHENTIC NOOMO LABS RATIOS
-   ========================================================================== */
 .home-preloader {
   align-content: center;
   align-items: center;
@@ -588,7 +562,6 @@ button {
   }
 }
 
-/* Morph to START Reveal State */
 .home-preloader .center .done {
   display: flex;
   align-items: center;
@@ -814,7 +787,6 @@ button {
   text-transform: uppercase;
 }
 
-/* Preloader Bottom */
 .home-preloader .bottom {
   margin-bottom: 24px;
   text-align: center;
@@ -833,9 +805,6 @@ button {
   margin-top: 15px;
 }
 
-/* ==========================================================================
-   VOLUME BUTTON (.volume)
-   ========================================================================== */
 .volume {
   align-items: center;
   background: #000;
@@ -949,9 +918,6 @@ button {
   pointer-events: none;
 }
 
-/* ==========================================================================
-   CIRCLE WIPE TRANSITION (.transition-component)
-   ========================================================================== */
 .transition-component {
   align-items: center;
   background: #fff;
@@ -1004,9 +970,6 @@ button {
   }
 }
 
-/* ==========================================================================
-   FIXED HEADER (header)
-   ========================================================================== */
 header {
   height: 65px;
   left: 0;
@@ -1149,7 +1112,6 @@ header .header .menu-switch.active .line:nth-child(2) {
   transform: rotate(45deg);
 }
 
-/* Fullscreen Mobile Drawer */
 header .header .mobile-menu {
   -webkit-backdrop-filter: blur(5px);
   backdrop-filter: blur(5px);
@@ -1203,9 +1165,6 @@ header .header .mobile-menu .bottom a {
   text-transform: uppercase;
 }
 
-/* ==========================================================================
-   VIRTUAL SCROLL TRACK (.home-page)
-   ========================================================================== */
 .home-page {
   height: 10000px;
   position: relative;
@@ -1213,9 +1172,6 @@ header .header .mobile-menu .bottom a {
   pointer-events: none;
 }
 
-/* ==========================================================================
-   FROSTED GLASS FOOTER (.home-footer)
-   ========================================================================== */
 .home-footer {
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
@@ -1439,19 +1395,12 @@ header .header .mobile-menu .bottom a {
   }
 }
 
-/* ==========================================================================
-   BOTTOM CONTROLS (.social-links-global)
-   ========================================================================== */
 .social-links-global-parent {
   bottom: 13px;
   left: 0;
   position: fixed;
   width: 100%;
-  /* Above every other layer except the cursor itself. At z-index 12 the
-     widget sat UNDER the preloader (1000), the circle-wipe transition (2000)
-     and both modal overlays (10000), so its panel was clipped or swallowed
-     whenever any of those were on screen. It is a persistent tool, so it
-     outranks all of them and only the cursor (2147483647) draws over it. */
+
   z-index: 2147483000;
   opacity: 0;
   transition: opacity 0.5s ease;
@@ -1479,9 +1428,6 @@ header .header .mobile-menu .bottom a {
   pointer-events: auto;
 }
 
-/* ==========================================================================
-   CUSTOMIZE ME AR WIDGET (.ar-mode)
-   ========================================================================== */
 .social-links-global .ar-mode {
   align-items: center;
   background: rgba(15, 20, 32, 0.88);
@@ -1613,7 +1559,6 @@ header .header .mobile-menu .bottom a {
   font-weight: 400;
 }
 
-/* Selected Menu Bar */
 .social-links-global .ar-mode .selected-menu {
   display: flex;
   flex-direction: column;
@@ -1695,9 +1640,6 @@ header .header .mobile-menu .bottom a {
   width: 18px;
 }
 
-/* ==========================================================================
-   MODAL OVERLAYS (WORK & CONTACT)
-   ========================================================================== */
 .work-modal-overlay,
 .contact-modal-overlay {
   position: fixed;
@@ -1903,7 +1845,6 @@ header .header .mobile-menu .bottom a {
   color: #666;
 }
 
-/* Contact Form */
 .contact-form {
   display: flex;
   flex-direction: column;
@@ -2000,9 +1941,6 @@ header .header .mobile-menu .bottom a {
   color: #666;
 }
 
-/* ==========================================================================
-   AUTHENTIC NOOMO LABS LOGO SCRIPT
-   ========================================================================== */
 .header-logo .logo-script {
   font-style: italic;
   font-family: 'Times New Roman', serif;
@@ -2012,9 +1950,6 @@ header .header .mobile-menu .bottom a {
   font-size: 1.1em;
 }
 
-/* ==========================================================================
-   HERO GIANT TYPOGRAPHY & STUDIO IDENTITY (BEHIND & AROUND 3D MODEL)
-   ========================================================================== */
 .hero-giant-title {
   position: fixed;
   inset: 0;
@@ -2022,7 +1957,7 @@ header .header .mobile-menu .bottom a {
   align-items: center;
   justify-content: center;
   z-index: 4;
-  /* Behind Three.js Canvas at z-index 5 */
+
   pointer-events: none;
   transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -2049,7 +1984,6 @@ header .header .mobile-menu .bottom a {
   padding: 0 40px;
 }
 
-/* Top Studio Prestige Tag */
 .hero-studio-badge {
   position: absolute;
   top: 96px;
@@ -2125,7 +2059,6 @@ header .header .mobile-menu .bottom a {
   text-transform: uppercase;
 }
 
-/* Main Giant Studio Title with Liquid Stagger Animation */
 .hero-title-wrap {
   position: relative;
   display: flex;
@@ -2210,7 +2143,6 @@ header .header .mobile-menu .bottom a {
   }
 }
 
-/* Studio Pitch & Accolades Statement */
 .hero-studio-pitch {
   position: absolute;
   bottom: 86px;
@@ -2224,12 +2156,7 @@ header .header .mobile-menu .bottom a {
   animation: pitchFadeIn 1s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards;
   opacity: 0;
   transform: translateY(16px);
-  /* NONE, not auto. This block is 720px wide and sits 86px off the bottom,
-     which puts its invisible box directly over the customize widget's swatch
-     row. With pointer-events:auto it silently ate every mousemove and click
-     aimed at the widget — the widget was on top visually (z-index
-     2147483000) but never received the pointer. It is non-interactive copy,
-     so it should never be a hit target. */
+
   pointer-events: none;
 }
 
@@ -2266,7 +2193,6 @@ header .header .mobile-menu .bottom a {
   letter-spacing: 0.01em;
 }
 
-/* Floating Studio Capability Pills (Left & Right Flanks) */
 .hero-floating-pills {
   position: absolute;
   inset: 0;
@@ -2361,9 +2287,6 @@ header .header .mobile-menu .bottom a {
   text-transform: uppercase;
 }
 
-/* ==========================================================================
-   FIXED BOTTOM LEFT SOUND BUTTON
-   ========================================================================== */
 .social-links-global .volume {
   position: fixed !important;
   bottom: 24px !important;
@@ -2371,15 +2294,12 @@ header .header .mobile-menu .bottom a {
   z-index: 50 !important;
 }
 
-/* ==========================================================================
-   HERO BOTTOM BAR: ARE YOU READY TO STEP INTO THE FUTURE? + HOLD TRACK
-   ========================================================================== */
 .hero-bottom-bar {
   position: fixed;
   bottom: 0;
   left: 0;
   width: 100%;
-  /* Enough left padding to clear the sound button (88px wide + 28px left + buffer) */
+
   padding: 0 28px 18px 140px;
   z-index: 20;
   display: flex;
@@ -2483,12 +2403,6 @@ header .header .mobile-menu .bottom a {
   transition: width 0.04s linear;
 }
 
-/* ==========================================================================
-   THE SCROLL NARRATIVE — overlay typography & HUD
-   Everything here is positioned by JS on a shared eased scroll clock, so the
-   CSS only owns look, never timing. No transitions on the driven properties:
-   a transition fighting a per-frame write is what makes scroll feel laggy.
-   ========================================================================== */
 .scroll-narrative {
   position: fixed;
   inset: 0;
@@ -2497,7 +2411,6 @@ header .header .mobile-menu .bottom a {
   overflow: hidden;
 }
 
-/* ── PHASE 1 · ROTATION TURNS ─────────────────────────────────────────── */
 .ks-turn {
   position: absolute;
   top: 50%;
@@ -2551,7 +2464,6 @@ header .header .mobile-menu .bottom a {
     0 18px 60px rgba(9, 14, 24, 0.14);
 }
 
-/* Per-character mask so each glyph rises out of its own slot. */
 .ks-char-wrap {
   display: inline-block;
   overflow: hidden;
@@ -2565,7 +2477,6 @@ header .header .mobile-menu .bottom a {
   will-change: transform, opacity;
 }
 
-/* ── PHASE 2 · ASCENT CAPTIONS ────────────────────────────────────────── */
 .ks-ascent {
   position: absolute;
   top: 50%;
@@ -2627,7 +2538,6 @@ header .header .mobile-menu .bottom a {
   margin: 0;
 }
 
-/* ── PHASE 3 · GLASS RINGS HUD ────────────────────────────────────────── */
 .ks-rings-hud {
   position: absolute;
   top: clamp(90px, 13vh, 150px);
@@ -2741,7 +2651,6 @@ header .header .mobile-menu .bottom a {
   box-shadow: 0 0 12px rgba(127, 212, 255, 0.9);
 }
 
-/* ── PHASE 4 · FINALE CAPTION ─────────────────────────────────────────── */
 .ks-finale {
   position: absolute;
   bottom: clamp(140px, 22vh, 230px);
@@ -2768,14 +2677,13 @@ header .header .mobile-menu .bottom a {
   letter-spacing: 0.3em;
   text-indent: 0.3em;
   text-transform: uppercase;
-  /* Sits over the bright 3D sky, so it needs its own contrast. */
+
   color: #f2f7ff;
   text-shadow: 0 1px 12px rgba(6, 11, 22, 0.85), 0 0 3px rgba(6, 11, 22, 0.6);
   margin: 0;
   text-align: center;
 }
 
-/* ── PERSISTENT HUD (right rail) ──────────────────────────────────────── */
 .ks-hud {
   position: absolute;
   right: clamp(18px, 2.4vw, 40px);
@@ -2845,7 +2753,6 @@ header .header .mobile-menu .bottom a {
   margin-left: 1px;
 }
 
-/* ── Responsive ───────────────────────────────────────────────────────── */
 @media (max-width: 991px) {
   .ks-ascent {
     width: calc(100% - 40px);
@@ -2887,9 +2794,6 @@ header .header .mobile-menu .bottom a {
   }
 }
 
-/* ==========================================================================
-   FULL-SCREEN EDITORIAL SLIDEOVER DRAWERS (WORK & CONTACT)
-   ========================================================================== */
 .work-editorial-overlay,
 .contact-editorial-overlay {
   position: fixed;
@@ -2975,7 +2879,6 @@ header .header .mobile-menu .bottom a {
   }
 }
 
-/* Sticky Topbar */
 .editorial-topbar {
   position: sticky;
   top: 0;
@@ -3038,7 +2941,6 @@ header .header .mobile-menu .bottom a {
   color: #888888;
 }
 
-/* Hero Section */
 .editorial-hero {
   padding: 44px 44px 28px 44px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.07);
@@ -3127,7 +3029,6 @@ header .header .mobile-menu .bottom a {
   letter-spacing: -0.01em;
 }
 
-/* Projects Grid */
 .editorial-work-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
@@ -3312,7 +3213,6 @@ header .header .mobile-menu .bottom a {
   color: #2b55f5;
 }
 
-/* Editorial Contact Two-Column Layout */
 .contact-content-grid {
   display: grid;
   grid-template-columns: 1fr 1.35fr;
@@ -3448,7 +3348,6 @@ header .header .mobile-menu .bottom a {
   line-height: 1.4;
 }
 
-/* Right Column Contact Form */
 .contact-form-col {
   background: #ffffff;
   padding: 36px 40px;
@@ -3608,7 +3507,6 @@ header .header .mobile-menu .bottom a {
   line-height: 1.5;
 }
 
-/* Editorial Drawer Bottom Footer */
 .editorial-drawer-footer {
   margin-top: auto;
   padding: 24px 44px;
@@ -3646,7 +3544,6 @@ header .header .mobile-menu .bottom a {
   color: #0433ff;
 }
 
-/* Responsive Breakpoints */
 @media (max-width: 900px) {
 
   .work-editorial-drawer,

@@ -28,8 +28,7 @@ export function StoryModal({ isOpen, onClose }: StoryModalProps) {
   return (
     <div className="story-modal-overlay" onClick={onClose} data-cursor="CLOSE">
       <div className="story-modal-container" onClick={(e) => e.stopPropagation()} data-cursor="READ">
-        {/* Modal Top Bar */}
-        <div className="modal-header">
+                <div className="modal-header">
           <div className="modal-badge">
             <span className="badge-dot" />
             <span>ARCHITECTURAL DOSSIER · VOL. IV</span>
@@ -48,8 +47,7 @@ export function StoryModal({ isOpen, onClose }: StoryModalProps) {
           </button>
         </div>
 
-        {/* Modal Content Scroll Area */}
-        <div className="modal-body">
+                <div className="modal-body">
           <div className="modal-hero-title">
             <span className="modal-chapter-tag">CASE STUDY 04 // KYOTO RESIDENCE</span>
             <h2>
@@ -61,8 +59,7 @@ export function StoryModal({ isOpen, onClose }: StoryModalProps) {
             </p>
           </div>
 
-          {/* Architectural Metrics Bar */}
-          <div className="metrics-grid">
+                    <div className="metrics-grid">
             <div className="metric-box">
               <span className="m-num">24.2 dB</span>
               <span className="m-label">Acoustic Floor Isolation</span>
@@ -81,8 +78,7 @@ export function StoryModal({ isOpen, onClose }: StoryModalProps) {
             </div>
           </div>
 
-          {/* Blueprint & Visual Composition */}
-          <div className="modal-visual-triptych">
+                    <div className="modal-visual-triptych">
             <div className="visual-panel panel-photo">
               <img
                 src="/house-of-stillness.jpg"
@@ -105,8 +101,7 @@ export function StoryModal({ isOpen, onClose }: StoryModalProps) {
             </div>
           </div>
 
-          {/* Editorial Text */}
-          <div className="modal-editorial">
+                    <div className="modal-editorial">
             <div className="editorial-col">
               <h3>The Philosophy of Subtraction</h3>
               <p>
@@ -121,8 +116,7 @@ export function StoryModal({ isOpen, onClose }: StoryModalProps) {
             </div>
           </div>
 
-          {/* Modal Footer */}
-          <div className="modal-footer">
+                    <div className="modal-footer">
             <span className="footer-origin">AURELIA ARCHITECTURAL PRACTICE · 2026</span>
             <button
               type="button"
