@@ -39,6 +39,17 @@ interface Shard {
   scatter: THREE.Vector3
   spin: THREE.Vector3
   phase: number
+  /* Chosen plates survive the burst as a drifting debris field. `field` is
+     their anchor, with y stored RELATIVE to the camera so the field rides
+     along as the camera climbs the world. */
+  ambient: boolean
+  field: THREE.Vector3
+  /* Where the burst left the plate, captured once on the first ambient frame.
+     The drift eases out of this toward `field`, so there is no jump between
+     the explosion and the ambient pattern. */
+  burst: THREE.Vector3
+  burstSet: boolean
+  ease: number
 }
 
 interface Ball {
@@ -117,15 +128,15 @@ const HASH = (i: number) => FRACT(Math.sin(i * 12.9898) * 43758.5453)
    per-triangle placement did not (it measured 0.008% leakage: the visible
    gaps the jellyfish showed through). */
 const SHELL_RADIUS = 2.6
-const SHELL_JITTER = 0.03
-/* Irregularity controls — see the comment at the shard build site. */
-/* Small lean only. The shell is a LAT-LONG GRID of plates (stacked rings of
-   panels, like a disco-ball / segmented sphere), not a scatter: the reference
-   look is an ordered mosaic whose seams read as latitude bands. A big random
-   tilt would destroy that grid, so this is just enough to stop every plate
-   lying perfectly flush and catching identical light. */
-const SHELL_TILT = 0.12 // max lean off tangent, radians (~7deg)
-const SHELL_SIZE_VAR = 0.06 // +/-6% so the grid is handmade, not stamped
+/* All three perturbations are ZERO: the shell is a perfectly regular mosaic.
+   Every plate sits at exactly SHELL_RADIUS, lies flush on the tangent plane
+   and is exactly the same size, so the latitude bands line up into clean
+   horizontal rings — the ordered, machined look of the reference. Ray casting
+   confirms the symmetric shell is still 0.0000% airtight, so none of this
+   irregularity was ever load-bearing for coverage. */
+const SHELL_JITTER = 0
+const SHELL_TILT = 0 // plates lie flush on the tangent plane
+const SHELL_SIZE_VAR = 0 // every plate identical
 /* Desktop and mobile shells. Both were Monte-Carlo verified sealed; the
    mobile variant trades 130 transmissive draw calls for larger plates. */
 /* `rows` = latitude bands; the count per band is derived so neighbours always
@@ -528,6 +539,27 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
               (HASH(i * 41.7) - 0.5) * 0.02
             ),
             phase: HASH(i * 53.7) * Math.PI * 2,
+            /* Roughly 45% of plates persist as ambient debris. Keeping all of
+               them would crowd the later sections and cost ~195 transmissive
+               draws forever; a subset reads as drifting crystal while the rest
+               genuinely blow away. */
+            ambient: HASH(i * 61.3) < 0.45,
+            /* Anchor on a tall cylindrical shell around the camera path, with
+               a hollow centre so nothing ever parks in front of the subject.
+               y is relative to the camera and spans a tall band so plates
+               enter and leave frame as the journey climbs. */
+            burst: new THREE.Vector3(),
+            burstSet: false,
+            ease: 0,
+            field: (() => {
+              const ang = HASH(i * 67.1) * Math.PI * 2
+              const rad = 7.5 + HASH(i * 71.9) * 9.5
+              return new THREE.Vector3(
+                Math.cos(ang) * rad,
+                (HASH(i * 73.7) * 2 - 1) * 15,
+                Math.sin(ang) * rad - 2.5
+              )
+            })(),
           })
         }
       }
@@ -978,7 +1010,10 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         shardsGroup.visible = true
       } else {
         /* ── THE JOURNEY ─────────────────────────────────────────────────── */
-        shardsGroup.visible = r.enterBlend < 0.995
+        /* The shards NEVER disappear. After the burst they become a permanent
+           ambient debris field that follows the camera up the world, so every
+           later section still has crystal drifting through it for depth. */
+        shardsGroup.visible = true
         ringsGroup.visible = s > TL.ascend.start - 0.06
 
         worldGroup.rotation.x = lerp(worldGroup.rotation.x, 0, 0.06)
@@ -1267,10 +1302,48 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           item.current.lerp(item.target, 0.085)
           item.mesh.position.copy(item.current)
           item.mesh.rotateZ(Math.sin(t * 0.3 + item.phase) * 0.0007 + hold * item.spin.z)
+        } else if (item.ambient) {
+          if (!item.burstSet) {
+            // Freeze the hand-off point, in camera-local Y.
+            item.burst.copy(item.current).setY(item.current.y - camPos.y)
+            item.burstSet = true
+          }
+          /* AMBIENT FIELD.
+             The plate drifts in a tall shell around the camera. Its anchor is
+             expressed RELATIVE to the current camera height, so the field
+             travels with the journey instead of being left behind at the hero
+             once the camera has climbed 47 units. Slow sine drift on all three
+             axes keeps it alive without ever looking like it is orbiting. */
+          const camY = camPos.y
+          item.target.set(
+            item.field.x + Math.sin(t * 0.21 + item.phase) * 1.15,
+            item.field.y + Math.cos(t * 0.17 + item.phase * 1.3) * 1.4,
+            item.field.z + Math.sin(t * 0.13 + item.phase * 0.7) * 1.15
+          )
+          /* Settle into the drift pattern in the camera's LOCAL frame, then add
+             the camera height. Lerping the camera-relative offset (rather than
+             the absolute world position) is essential: the camera climbs 39
+             units over the journey, and a 0.018 world-space lerp lagged it by
+             7-14 units — far outside the ~2.7-unit half-view — so the field
+             was left behind and the later sections emptied out. In the local
+             frame the plate tracks the camera exactly and the easing only ever
+             applies to the drift itself. */
+          item.ease = lerp(item.ease, 1, 0.018)
+          item.current.lerpVectors(item.burst, item.target, item.ease)
+          item.mesh.position.set(
+            item.current.x,
+            item.current.y + camY * item.ease,
+            item.current.z
+          )
+          item.mesh.rotation.x += item.spin.x * 0.35
+          item.mesh.rotation.y += item.spin.y * 0.35
+          item.mesh.rotation.z += item.spin.z * 0.35
         } else {
+          // Plates not chosen for the field fly out and stay gone.
           item.target.copy(item.home).addScaledVector(item.scatter, 1.6)
           item.current.lerp(item.target, 0.05)
           item.mesh.position.copy(item.current)
+          item.mesh.visible = r.enterBlend < 0.995
           item.mesh.rotation.x += item.spin.x
           item.mesh.rotation.y += item.spin.y
           item.mesh.rotation.z += item.spin.z

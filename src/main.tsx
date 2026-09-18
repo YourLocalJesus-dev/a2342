@@ -68,6 +68,8 @@ function App() {
   const [cursorText, setCursorText] = useState('')
   const [isCursorDiff, setIsCursorDiff] = useState(false)
   const [isCursorExpanded, setIsCursorExpanded] = useState(false)
+  // Shrinks the expanded ring over small controls (customize widget).
+  const [isCursorSmall, setIsCursorSmall] = useState(false)
 
   // Customize Me Widget State
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false)
@@ -266,6 +268,11 @@ function App() {
         return
       }
 
+      /* The customize widget is a dense cluster of small swatches and icon
+         buttons; the full-size ring would cover the very control being
+         aimed at, so the cursor goes compact anywhere inside it. */
+      setIsCursorSmall(!!target.closest('.social-links-global-parent'))
+
       // Check [data-cursor]
       const cursorTarget = target.closest('[data-cursor]') as HTMLElement | null
       if (cursorTarget) {
@@ -322,7 +329,7 @@ function App() {
       <div
         id="cursor"
         ref={cursorRef}
-        className={`${isCursorDiff ? 'dif' : ''} ${isCursorExpanded ? 'expanded' : ''}`}
+        className={`${isCursorDiff ? 'dif' : ''} ${isCursorExpanded ? 'expanded' : ''} ${isCursorSmall ? 'small' : ''}`}
       >
         <div className="wrapper">
           <div className="text">

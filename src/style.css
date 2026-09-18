@@ -178,6 +178,22 @@ button {
   transform: scale(1);
 }
 
+/* Compact variant. The 92px expanded ring is sized for big hero targets; over
+   the customize widget's small swatches and icon buttons it swallowed the
+   control underneath, so you could not see what you were about to click.
+   `.small` keeps the label but shrinks the ring to fit those targets. */
+#cursor.expanded.small .wrapper {
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+#cursor.expanded.small .text p {
+  font-size: 7px;
+  letter-spacing: 0.02em;
+}
+
 /* Difference blend for dark UI (header links, START) */
 #cursor.dif {
   mix-blend-mode: difference;
@@ -1431,7 +1447,12 @@ header .header .mobile-menu .bottom a {
   left: 0;
   position: fixed;
   width: 100%;
-  z-index: 12;
+  /* Above every other layer except the cursor itself. At z-index 12 the
+     widget sat UNDER the preloader (1000), the circle-wipe transition (2000)
+     and both modal overlays (10000), so its panel was clipped or swallowed
+     whenever any of those were on screen. It is a persistent tool, so it
+     outranks all of them and only the cursor (2147483647) draws over it. */
+  z-index: 2147483000;
   opacity: 0;
   transition: opacity 0.5s ease;
   pointer-events: none;
