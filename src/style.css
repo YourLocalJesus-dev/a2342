@@ -78,6 +78,137 @@ button {
 }
 
 
+/* ==========================================================================
+   CUSTOM CURSOR (#cursor)
+   The app renders <div id="cursor"> with .wrapper > .text > p inside, and
+   body sets `cursor: none`. Without these rules the element has no box at
+   all, so the pointer simply vanished. Position is written as a transform
+   from JS, so translate(-50%,-50%) is applied on an inner element instead
+   of here — otherwise it would fight the JS transform every frame.
+   ========================================================================== */
+#cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 2147483647;
+  will-change: transform;
+}
+
+#cursor .wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border: 1px solid rgba(9, 14, 24, 0.55);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    width 0.42s cubic-bezier(0.16, 1, 0.3, 1),
+    height 0.42s cubic-bezier(0.16, 1, 0.3, 1),
+    margin 0.42s cubic-bezier(0.16, 1, 0.3, 1),
+    background 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+/* Centre dot */
+#cursor .wrapper::after {
+  content: '';
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #05080f;
+  transition: opacity 0.25s ease, transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#cursor .text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0 8px;
+}
+
+#cursor .text p {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1.15;
+  text-transform: uppercase;
+  text-align: center;
+  color: #05080f;
+  white-space: pre-line;
+  opacity: 0;
+  transform: scale(0.75);
+  transition: opacity 0.26s ease, transform 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Expanded: a label is showing (e.g. CLICK AND HOLD, VIEW CASE) */
+#cursor.expanded .wrapper {
+  width: 92px;
+  height: 92px;
+  margin: -46px 0 0 -46px;
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(9, 14, 24, 0.7);
+  box-shadow:
+    0 12px 38px rgba(9, 14, 24, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+#cursor.expanded .wrapper::after {
+  opacity: 0;
+  transform: scale(0.4);
+}
+
+#cursor.expanded .text p {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Difference blend for dark UI (header links, START) */
+#cursor.dif {
+  mix-blend-mode: difference;
+}
+
+#cursor.dif .wrapper {
+  border-color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+#cursor.dif .wrapper::after {
+  background: #ffffff;
+}
+
+#cursor.dif .text p {
+  color: #ffffff;
+}
+
+/* Touch devices have no pointer to replace — restore the native one. */
+@media (pointer: coarse) {
+  #cursor {
+    display: none;
+  }
+
+  body,
+  a,
+  button {
+    cursor: auto;
+  }
+}
+
 .custom-cursor {
   position: fixed;
   inset: 0;
@@ -1054,348 +1185,6 @@ header .header .mobile-menu .bottom a {
   letter-spacing: 0.76px;
   color: #000;
   text-transform: uppercase;
-}
-
-/* ==========================================================================
-   SCENE TEXTS & FLOATING NARRATIVE (.scene-texts)
-   ========================================================================== */
-.scene-texts {
-  height: 100%;
-  left: 0;
-  opacity: 0;
-  pointer-events: none;
-  position: fixed;
-  top: 0;
-  width: 100%;
-  z-index: 8;
-  transition: opacity 0.5s ease;
-}
-
-.scene-texts.is-visible {
-  opacity: 1;
-}
-
-/* Left Bar HUD */
-.scene-texts .left-bar {
-  align-items: center;
-  display: flex;
-  height: 100%;
-  justify-content: center;
-  left: 8px;
-  position: absolute;
-  top: 0;
-  width: 15px;
-  z-index: 10;
-}
-
-@media (max-width: 991px) {
-  .scene-texts .left-bar {
-    display: none;
-  }
-}
-
-.scene-texts .left-bar .parent {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.scene-texts .left-bar .parent .cross {
-  background: #000;
-  display: block;
-  height: 1px;
-  margin: 0 auto 15px;
-  width: 5px;
-  position: relative;
-}
-
-.scene-texts .left-bar .parent .cross::before {
-  background: #000;
-  content: "";
-  height: 1px;
-  position: absolute;
-  transform: rotate(90deg);
-  width: 5px;
-  left: 0;
-  top: 0;
-}
-
-.scene-texts .left-bar .parent .value {
-  color: #000;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-style: normal;
-  font-weight: 500;
-  letter-spacing: 0.33px;
-  line-height: 13px;
-  margin-bottom: 15px;
-  text-align: center;
-  text-transform: uppercase;
-  transition: transform 0.3s;
-}
-
-.scene-texts .left-bar .parent .value.active {
-  transform: scale(1.3);
-  font-weight: 700;
-}
-
-/* Right Bar HUD */
-.scene-texts .right-bar {
-  align-items: center;
-  display: flex;
-  height: 100%;
-  justify-content: center;
-  position: absolute;
-  right: 8px;
-  top: 0;
-  width: 15px;
-  z-index: 10;
-}
-
-@media (max-width: 991px) {
-  .scene-texts .right-bar {
-    display: none;
-  }
-}
-
-.scene-texts .right-bar .parent {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.scene-texts .right-bar .parent img {
-  display: block;
-  margin: auto;
-}
-
-.scene-texts .right-bar .parent .progress {
-  color: #000;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-style: normal;
-  font-weight: 500;
-  height: 40px;
-  letter-spacing: 0.27px;
-  line-height: 13px;
-  text-align: center;
-  text-transform: uppercase;
-  transform: rotate(90deg) translateY(14px);
-  transform-origin: center;
-}
-
-/* Floating Narrative Glass Cards */
-.scene-texts .wrapper {
-  height: 100%;
-  position: relative;
-  width: 100%;
-  pointer-events: none;
-}
-
-/* Base Glassmorphic Container */
-.glass-showcase-card {
-  position: absolute;
-  background: rgba(255, 255, 255, 0.58);
-  -webkit-backdrop-filter: blur(28px) saturate(190%);
-  backdrop-filter: blur(28px) saturate(190%);
-  border: 1px solid rgba(255, 255, 255, 0.85);
-  box-shadow: 0 20px 48px -8px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(0, 0, 0, 0.03);
-  border-radius: 20px;
-  padding: 24px 28px;
-  pointer-events: auto;
-  opacity: 0;
-  transform: translateY(24px) scale(0.97);
-  transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-  max-width: 440px;
-  z-index: 10;
-}
-
-.glass-showcase-card.is-active {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
-.glass-showcase-card:hover {
-  background: rgba(255, 255, 255, 0.68);
-  border-color: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 24px 60px -6px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 1);
-}
-
-.glass-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.glass-badge {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  font-weight: 600;
-  color: #2563eb;
-  background: rgba(37, 99, 235, 0.08);
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(37, 99, 235, 0.18);
-  text-transform: uppercase;
-}
-
-.glass-sub {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.15em;
-  color: #64748b;
-  text-transform: uppercase;
-}
-
-.glass-card-title {
-  font-family: var(--font-headline);
-  font-size: 20px;
-  font-weight: 700;
-  color: #0f172a;
-  line-height: 1.25;
-  margin-bottom: 10px;
-  letter-spacing: -0.02em;
-}
-
-.glass-card-desc {
-  font-family: var(--font-body);
-  font-size: 14.5px;
-  font-weight: 450;
-  color: #334155;
-  line-height: 1.55;
-  margin-bottom: 16px;
-}
-
-.glass-card-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.glass-card-tags span {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  color: #1e293b;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  padding: 4px 10px;
-  border-radius: 8px;
-}
-
-.glass-card-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.glass-action-btn {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #0f172a;
-  background: rgba(0, 0, 0, 0.06);
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  padding: 8px 16px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.glass-action-btn:hover {
-  background: #0f172a;
-  color: #fff;
-}
-
-/* Placements */
-.glass-showcase-card.bottom-card {
-  bottom: 30px;
-  left: 50%;
-  transform: translateX(-50%) translateY(24px) scale(0.97);
-  max-width: 520px;
-  width: calc(100% - 48px);
-  text-align: left;
-}
-
-.glass-showcase-card.bottom-card.is-active {
-  transform: translateX(-50%) translateY(0) scale(1);
-}
-
-.glass-showcase-card.side-card.left-card {
-  top: 50%;
-  left: 48px;
-  transform: translateY(-50%) translateY(24px) scale(0.97);
-}
-
-.glass-showcase-card.side-card.left-card.is-active {
-  transform: translateY(-50%) translateY(0) scale(1);
-}
-
-.glass-showcase-card.side-card.right-card {
-  top: 50%;
-  right: 48px;
-  transform: translateY(-50%) translateY(24px) scale(0.97);
-}
-
-.glass-showcase-card.side-card.right-card.is-active {
-  transform: translateY(-50%) translateY(0) scale(1);
-}
-
-/* Metrics Grid Inside Glass Card */
-.glass-metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.metric-item {
-  display: flex;
-  flex-direction: column;
-  background: rgba(255, 255, 255, 0.65);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 12px;
-  padding: 10px;
-  text-align: center;
-}
-
-.metric-item strong {
-  font-family: var(--font-headline);
-  font-size: 20px;
-  font-weight: 700;
-  color: #0f172a;
-  line-height: 1;
-}
-
-.metric-item span {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  color: #64748b;
-  margin-top: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-@media (max-width: 991px) {
-
-  .glass-showcase-card.side-card.left-card,
-  .glass-showcase-card.side-card.right-card {
-    left: 20px;
-    right: 20px;
-    max-width: calc(100% - 40px);
-    top: auto;
-    bottom: 80px;
-    transform: translateY(24px);
-  }
-
-  .glass-showcase-card.side-card.left-card.is-active,
-  .glass-showcase-card.side-card.right-card.is-active {
-    transform: translateY(0);
-  }
 }
 
 /* ==========================================================================
@@ -2668,9 +2457,12 @@ header .header .mobile-menu .bottom a {
 }
 
 /* ==========================================================================
-   PREMIUM KINETIC SCROLL SYSTEM — Sequential, Non-Overlapping
+   THE SCROLL NARRATIVE — overlay typography & HUD
+   Everything here is positioned by JS on a shared eased scroll clock, so the
+   CSS only owns look, never timing. No transitions on the driven properties:
+   a transition fighting a per-frame write is what makes scroll feel laggy.
    ========================================================================== */
-.kinetic-scroll-layer {
+.scroll-narrative {
   position: fixed;
   inset: 0;
   z-index: 50;
@@ -2678,281 +2470,394 @@ header .header .mobile-menu .bottom a {
   overflow: hidden;
 }
 
-/* Base phrase — all stack at center, each type positions itself */
-.kinetic-phrase {
+/* ── PHASE 1 · ROTATION TURNS ─────────────────────────────────────────── */
+.ks-turn {
   position: absolute;
-  pointer-events: none;
-  will-change: transform, opacity, clip-path, filter;
-}
-
-/* All h2 — premium tight tracking */
-.kinetic-phrase h2 {
-  font-family: var(--font-display);
-  font-weight: 700;
-  color: #000;
-  line-height: 0.86;
-  letter-spacing: -0.03em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  user-select: none;
-  margin: 0;
-}
-
-/* Eyebrow label */
-.kinetic-phrase .ks-eyebrow {
-  display: block;
-  font-family: var(--font-mono);
-  font-size: clamp(10px, 0.95vw, 13px);
-  font-weight: 700;
-  letter-spacing: 0.28em;
-  color: rgba(0, 0, 0, 0.85);
-  text-transform: uppercase;
-  margin-bottom: 14px;
-  text-shadow: 0 2px 8px rgba(255, 255, 255, 0.9);
-}
-
-/* ── 3D ORBIT: massive spatial typography tilting on XYZ along camera trajectory */
-.ks-3d-orbit {
   top: 50%;
   left: 50%;
-  text-align: center;
-  perspective: 1200px;
-  transform-style: preserve-3d;
+  width: 94vw;
+  max-width: 1500px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  width: 90vw;
-  max-width: 1400px;
+  text-align: center;
+  will-change: transform, opacity, filter;
+  transform: translate3d(-50%, -50%, 0);
 }
 
-.ks-telemetry-badge {
+.ks-turn-index {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 18px;
-  background: rgba(15, 23, 42, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 9999px;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
-  margin-bottom: 24px;
-}
-
-.ks-telemetry-badge .telemetry-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #38ef7d;
-  box-shadow: 0 0 10px #38ef7d;
-  animation: pulseBeacon 1.2s infinite alternate;
-}
-
-.ks-telemetry-badge .telemetry-text {
   font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  color: #ffffff;
+  font-size: clamp(9px, 0.82vw, 11.5px);
+  font-weight: 700;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: rgba(9, 14, 24, 0.62);
   text-transform: uppercase;
-  font-weight: 600;
+  margin-bottom: clamp(14px, 1.8vw, 26px);
 }
 
-.ks-orbit-headings {
-  position: relative;
-}
-
-.ks-orbit-title {
-  font-family: var(--font-display);
-  font-size: clamp(64px, 12vw, 175px);
-  line-height: 0.92;
-  letter-spacing: -0.035em;
-  text-transform: uppercase;
-  color: #0b0f19;
-  text-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
-  transition: transform 0.3s ease;
-}
-
-.ks-orbit-title.ks-shifted {
-  transform: skewX(-4deg);
-}
-
-.ks-glow-word {
-  color: #000000;
-  -webkit-text-stroke: 1.5px rgba(0, 0, 0, 0.8);
-  letter-spacing: 0.02em;
-}
-
-.ks-outline-word {
-  color: transparent;
-  -webkit-text-stroke: 2px #0b0f19;
-}
-
-.ks-streak-tags {
-  display: flex;
-  gap: 16px;
-  margin-top: 32px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-
-.ks-tag-pill {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  color: #0f172a;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(15, 23, 42, 0.15);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  padding: 6px 16px;
-  border-radius: 9999px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
-  transition: transform 0.1s linear;
-}
-
-/* ── SEQUENTIAL RISING BOLD TURNS (PHASE 1 ROTATION) ── */
-.ks-rise-turn {
-  top: 50%;
-  left: 50%;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  width: 90vw;
-  max-width: 1400px;
-  will-change: transform, opacity;
+.ks-turn-index i {
+  width: clamp(28px, 4vw, 64px);
+  height: 1px;
+  background: currentColor;
+  opacity: 0.5;
+  display: block;
 }
 
 .ks-turn-title {
   font-family: var(--font-display);
-  font-size: clamp(80px, 15vw, 220px);
-  line-height: 0.88;
-  letter-spacing: -0.04em;
+  font-weight: 700;
+  font-size: clamp(56px, 13.5vw, 230px);
+  line-height: 0.84;
+  letter-spacing: -0.045em;
   text-transform: uppercase;
-  color: #000;
-  -webkit-text-stroke: 1.5px rgba(0, 0, 0, 0.7);
-  text-shadow:
-    0 4px 16px rgba(255, 255, 255, 0.95),
-    0 8px 32px rgba(255, 255, 255, 0.8),
-    0 14px 48px rgba(0, 0, 0, 0.18);
-  margin-top: 4px;
-}
-
-/* ── ASCENT & GLASS RINGS HUD ── */
-.ks-rings-hud {
-  top: 14%;
-  left: 50%;
-  transform: translateX(-50%);
+  color: #05080f;
+  margin: 0;
   display: flex;
   justify-content: center;
-  pointer-events: none;
-  z-index: 15;
+  white-space: nowrap;
+  text-shadow:
+    0 2px 30px rgba(255, 255, 255, 0.85),
+    0 18px 60px rgba(9, 14, 24, 0.14);
 }
 
-.rings-hud-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 22px;
-  background: rgba(10, 15, 26, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 9999px;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28);
+/* Per-character mask so each glyph rises out of its own slot. */
+.ks-char-wrap {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  padding: 0 0 0.06em;
+  margin: 0 -0.005em;
 }
 
-.rings-hud-badge .hud-pulse {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #53d5fd;
-  box-shadow: 0 0 12px #53d5fd;
-  animation: pulseBeacon 1.2s infinite alternate;
+.ks-char {
+  display: inline-block;
+  will-change: transform, opacity;
 }
 
-.rings-hud-badge .hud-text {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.22em;
-  color: #ffffff;
-  text-transform: uppercase;
-  font-weight: 600;
-}
-
-/* ── RACE LEFT: massive word blasts from right into view */
-.ks-race-left {
+/* ── PHASE 2 · ASCENT CAPTIONS ────────────────────────────────────────── */
+.ks-ascent {
+  position: absolute;
   top: 50%;
-  left: 0;
-  width: max-content;
+  width: min(30vw, 400px);
+  will-change: transform, opacity, filter;
+  background: rgba(255, 255, 255, 0.5);
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  backdrop-filter: blur(26px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 18px;
+  padding: 22px 24px 24px;
+  box-shadow:
+    0 24px 60px -14px rgba(9, 14, 24, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.ks-ascent-left {
+  left: clamp(24px, 5vw, 90px);
+  transform: translateY(-50%);
+  margin-top: -6vh;
+}
+
+.ks-ascent-right {
+  right: clamp(24px, 5vw, 90px);
+  transform: translateY(-50%);
+  margin-top: 4vh;
+}
+
+.ks-ascent-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.09);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  padding: 4px 11px;
+  border-radius: 999px;
+  margin-bottom: 14px;
+}
+
+.ks-ascent h3 {
+  font-family: var(--font-headline);
+  font-size: clamp(17px, 1.5vw, 23px);
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: -0.022em;
+  color: #070b14;
+  margin: 0 0 10px;
+}
+
+.ks-ascent p {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #33415a;
+  margin: 0;
+}
+
+/* ── PHASE 3 · GLASS RINGS HUD ────────────────────────────────────────── */
+.ks-rings-hud {
+  position: absolute;
+  top: clamp(90px, 13vh, 150px);
+  left: 50%;
+  transform: translateX(-50%);
+  will-change: opacity;
+}
+
+.ks-rings-inner {
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 2vw, 30px);
+  padding: 14px 26px;
+  border-radius: 999px;
+  background: rgba(7, 11, 20, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  backdrop-filter: blur(22px) saturate(170%);
+  box-shadow: 0 20px 55px -12px rgba(0, 0, 0, 0.5);
+}
+
+.ks-rings-counter {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-family: var(--font-mono);
+  color: #fff;
+}
+
+.ks-rings-counter span {
+  font-size: clamp(22px, 2.1vw, 32px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ks-rings-counter i {
+  width: 14px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.4);
+  transform: translateY(-5px);
+}
+
+.ks-rings-counter em {
+  font-style: normal;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+
+.ks-rings-meta {
+  min-width: clamp(180px, 22vw, 300px);
+}
+
+.ks-rings-meta h3 {
+  font-family: var(--font-headline);
+  font-size: clamp(14px, 1.25vw, 19px);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #fff;
+  margin: 0 0 3px;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
-.ks-race-left h2 {
-  font-size: clamp(110px, 23vw, 360px);
-  line-height: 1;
-  letter-spacing: -0.045em;
+.ks-rings-meta h3.is-swap {
+  animation: ksSwapIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* ── COLLIDE: two lines crash from opposite sides into centre */
-.ks-collide {
-  top: 50%;
+@keyframes ksSwapIn {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+    filter: blur(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+.ks-rings-meta p {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 0;
+  white-space: nowrap;
+}
+
+.ks-rings-dots {
+  display: flex;
+  gap: 7px;
+}
+
+.ks-ring-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.24);
+  transition: background 0.4s ease, transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.4s ease;
+}
+
+.ks-ring-dot.is-active {
+  background: #7fd4ff;
+  transform: scale(1.5);
+  box-shadow: 0 0 12px rgba(127, 212, 255, 0.9);
+}
+
+/* ── PHASE 4 · FINALE CAPTION ─────────────────────────────────────────── */
+.ks-finale {
+  position: absolute;
+  bottom: clamp(140px, 22vh, 230px);
   left: 50%;
-  transform: translateX(-50%) translateY(-50%);
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  overflow: visible;
+  align-items: center;
+  gap: 16px;
+  will-change: transform, opacity, filter;
+  transform: translate3d(-50%, 0, 0);
 }
 
-.ks-collide h2 {
-  font-size: clamp(85px, 18vw, 280px);
-  white-space: nowrap;
+.ks-finale-rule {
+  width: 52px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 0 10px rgba(6, 11, 22, 0.5);
 }
 
-.ks-collide .ks-line-a {
-  align-self: flex-start;
-}
-
-.ks-collide .ks-line-b {
-  align-self: flex-end;
-}
-
-/* ── RACE RIGHT: outlined text sweeps right to left */
-.ks-race-right {
-  top: 50%;
-  left: 0;
-  width: max-content;
-  white-space: nowrap;
-}
-
-.ks-race-right h2 {
-  font-size: clamp(110px, 25vw, 400px);
-  line-height: 1;
-  letter-spacing: -0.05em;
-  -webkit-text-stroke: 2.5px #000;
-  color: transparent;
-}
-
-/* ── MONUMENT: full-screen centered convergence */
-.ks-monument {
-  top: 50%;
-  left: 50%;
+.ks-finale p {
+  font-family: var(--font-mono);
+  font-size: clamp(10px, 0.95vw, 12.5px);
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  text-transform: uppercase;
+  /* Sits over the bright 3D sky, so it needs its own contrast. */
+  color: #f2f7ff;
+  text-shadow: 0 1px 12px rgba(6, 11, 22, 0.85), 0 0 3px rgba(6, 11, 22, 0.6);
+  margin: 0;
   text-align: center;
-  transform-origin: center center;
 }
 
-.ks-monument h2 {
-  font-size: clamp(82px, 17vw, 270px);
-  background: linear-gradient(135deg, #0a0a0a 0%, #444 50%, #0a0a0a 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+/* ── PERSISTENT HUD (right rail) ──────────────────────────────────────── */
+.ks-hud {
+  position: absolute;
+  right: clamp(18px, 2.4vw, 40px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.ks-hud-chapters {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+}
+
+.ks-hud-chapter {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: rgba(9, 14, 24, 0.28);
+  writing-mode: vertical-rl;
+  transition: color 0.45s ease, opacity 0.45s ease;
+}
+
+.ks-hud-chapter.is-active {
+  color: rgba(9, 14, 24, 0.92);
+}
+
+.ks-hud-rail {
+  width: 1px;
+  height: clamp(80px, 13vh, 140px);
+  background: rgba(9, 14, 24, 0.16);
+  position: relative;
+  overflow: hidden;
+}
+
+.ks-hud-fill {
+  position: absolute;
+  inset: 0;
+  background: #05080f;
+  transform-origin: top center;
+  transform: scaleY(0);
+  will-change: transform, filter;
+}
+
+.ks-hud-value {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: rgba(9, 14, 24, 0.8);
+  font-variant-numeric: tabular-nums;
+}
+
+.ks-hud-value em {
+  font-style: normal;
+}
+
+.ks-hud-value::after {
+  content: '%';
+  opacity: 0.4;
+  margin-left: 1px;
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────── */
+@media (max-width: 991px) {
+  .ks-ascent {
+    width: calc(100% - 40px);
+    left: 20px;
+    right: 20px;
+    top: auto;
+    bottom: clamp(110px, 18vh, 170px);
+    transform: none;
+    margin-top: 0;
+  }
+
+  .ks-rings-inner {
+    gap: 14px;
+    padding: 11px 18px;
+  }
+
+  .ks-rings-meta {
+    min-width: 0;
+  }
+
+  .ks-rings-meta h3 {
+    font-size: 13px;
+  }
+
+  .ks-hud {
+    right: 10px;
+  }
+
+  .ks-hud-chapters {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ks-turn,
+  .ks-ascent,
+  .ks-finale {
+    filter: none !important;
+  }
 }
 
 /* ==========================================================================

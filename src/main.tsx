@@ -5,6 +5,8 @@ import { JellyCanvas, JellyConfig } from './components/JellyCanvas'
 import { WorkModal } from './components/WorkModal'
 import { ContactModal } from './components/ContactModal'
 import { sound } from './components/AudioEngine'
+import { ScrollNarrative } from './components/ScrollNarrative'
+import { scrollStore } from './scroll'
 
 // The 36 authentic curated color swatches matching Noomo Labs
 const PALETTE_COLORS = [
@@ -45,9 +47,8 @@ function App() {
   // Audio State
   const [isSoundOn, setIsSoundOn] = useState(true)
 
-  // Scroll Tracking (0.0 to 1.0)
-  const [scrollProgress, setScrollProgress] = useState(0)
-  const lastScrollProgressRef = useRef(0)
+  // Scroll audio cue tracking (visual scroll lives in the shared scrollStore)
+  const lastScrollCueRef = useRef(0)
 
   // Custom Magnetic Cursor
   const [cursorPos, setCursorPos] = useState({ x: -100, y: -100 })
@@ -132,6 +133,10 @@ function App() {
     setHoldProgress(1)
     sound.playHoldBurst()
     document.body.style.overflow = 'auto'
+    /* The "CLICK AND HOLD" label is set by the canvas hover test, which only
+       re-runs on mouse MOVE. Entering without moving the mouse would leave the
+       label stuck on screen, so clear it explicitly here. */
+    resetCursor()
   }
 
   useEffect(() => {
@@ -199,24 +204,21 @@ function App() {
     }
   }, [isEntered, isTransitionOpened])
 
-  // Window Scroll Listener for 10,000px Track (when entered)
+  // Hand the scroll track over to the shared eased scroll store once the
+  // experience is entered, and ride it for the audio swoosh cues.
   useEffect(() => {
-    const handleScroll = () => {
-      if (!isEntered) return
-      const maxScroll = document.documentElement.scrollHeight - window.innerHeight
-      if (maxScroll <= 0) return
-      const progress = Math.min(Math.max(window.scrollY / maxScroll, 0), 1)
-      setScrollProgress(progress)
-
-      const diff = Math.abs(progress - lastScrollProgressRef.current)
+    if (!isEntered) {
+      scrollStore.reset()
+      return
+    }
+    scrollStore.start()
+    return scrollStore.subscribe((smooth) => {
+      const diff = Math.abs(smooth - lastScrollCueRef.current)
       if (diff > 0.04) {
         sound.playScrollSwoosh(diff * 4.5)
-        lastScrollProgressRef.current = progress
+        lastScrollCueRef.current = smooth
       }
-    }
-
-    window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => window.removeEventListener('scroll', handleScroll)
+    })
   }, [isEntered])
 
   // Custom Cursor Mouse Listener with Automatic Hover Detection
@@ -280,16 +282,6 @@ function App() {
     setJellyConfig(DEFAULT_JELLY_CONFIG)
   }
 
-  // Active discipline badge on Left HUD Bar
-  const getActiveDiscipline = () => {
-    if (scrollProgress < 0.25) return 'AR'
-    if (scrollProgress < 0.5) return '3D'
-    if (scrollProgress < 0.75) return 'AI'
-    return 'XR'
-  }
-
-  const activeDiscipline = getActiveDiscipline()
-  const displayPercent = Math.min(Math.round(scrollProgress * 100), 100)
 
   return (
     <div className="aurelia-app">
@@ -618,7 +610,6 @@ function App() {
       {/* 3D WebGL Canvas with Faceted Chrome Sphere & Jellyfish */}
       <JellyCanvas
         config={jellyConfig}
-        scrollProgress={scrollProgress}
         holdProgress={holdProgress}
         isEntered={isEntered}
         isTransitionOpened={isTransitionOpened}
@@ -646,249 +637,14 @@ function App() {
         </div>
       </div>
 
-      {/* ================================================================
-          PREMIUM SCROLL SYSTEM — 5-Phase Timeline:
-            0–32%   Phase 1: Horizontal 360° Orbit with 4 Rotation Turns
-            32–52%  Phase 2: Ascent through info cards
-            52–76%  Phase 3: 4 Glass Project Rings
-            76–86%  Phase 4: Post-ring ascending flight
-            86–100% Phase 5: AURELIA rising from below
-          ================================================================ */}
-      {isEntered && (
-        <div className="kinetic-scroll-layer">
-
-          {/* ── 4 SEQUENTIAL ROTATION PHASES (PURE HORIZONTAL 360° ORBIT 0% TO 32%) ── */}
-          {/* Turn 1: DESIGN (0% – 8%) */}
-          {(() => {
-            const p = scrollProgress
-            const vis = p < 0.09
-            if (!vis) return null
-            const enter = Math.min(p / 0.02 + 0.15, 1)
-            const exit = Math.max((p - 0.055) / 0.035, 0)
-            return (
-              <div
-                className="kinetic-phrase ks-rise-turn"
-                style={{
-                  opacity: enter * (1 - exit),
-                  transform: `translate3d(-50%, calc(-50% + ${(1 - enter) * 110 - exit * 80}px), 0)`,
-                }}
-              >
-                <span className="ks-eyebrow">[ ROTATION TURN 01 // 360° ORBIT ]</span>
-                <h2 className="ks-turn-title">DESIGN</h2>
-              </div>
-            )
-          })()}
-
-          {/* Turn 2: TO DELIGHT (8% – 16%) */}
-          {(() => {
-            const p = scrollProgress
-            const vis = p >= 0.08 && p < 0.17
-            if (!vis) return null
-            const t = (p - 0.08) / 0.08
-            const enter = Math.min(t / 0.35, 1)
-            const exit = Math.max((t - 0.6) / 0.4, 0)
-            return (
-              <div
-                className="kinetic-phrase ks-rise-turn"
-                style={{
-                  opacity: enter * (1 - exit),
-                  transform: `translate3d(-50%, calc(-50% + ${(1 - enter) * 110 - exit * 80}px), 0)`,
-                }}
-              >
-                <span className="ks-eyebrow">[ ROTATION TURN 02 // AXIS SHIFT ]</span>
-                <h2 className="ks-turn-title">TO DELIGHT</h2>
-              </div>
-            )
-          })()}
-
-          {/* Turn 3: TO ACHIEVE (16% – 24%) */}
-          {(() => {
-            const p = scrollProgress
-            const vis = p >= 0.16 && p < 0.25
-            if (!vis) return null
-            const t = (p - 0.16) / 0.08
-            const enter = Math.min(t / 0.35, 1)
-            const exit = Math.max((t - 0.6) / 0.4, 0)
-            return (
-              <div
-                className="kinetic-phrase ks-rise-turn"
-                style={{
-                  opacity: enter * (1 - exit),
-                  transform: `translate3d(-50%, calc(-50% + ${(1 - enter) * 110 - exit * 80}px), 0)`,
-                }}
-              >
-                <span className="ks-eyebrow">[ ROTATION TURN 03 // VELOCITY SHIFT ]</span>
-                <h2 className="ks-turn-title">TO ACHIEVE</h2>
-              </div>
-            )
-          })()}
-
-          {/* Turn 4: TO ACCOMPLISH (24% – 32%) */}
-          {(() => {
-            const p = scrollProgress
-            const vis = p >= 0.24 && p < 0.33
-            if (!vis) return null
-            const t = (p - 0.24) / 0.08
-            const enter = Math.min(t / 0.35, 1)
-            const exit = Math.max((t - 0.6) / 0.4, 0)
-            return (
-              <div
-                className="kinetic-phrase ks-rise-turn"
-                style={{
-                  opacity: enter * (1 - exit),
-                  transform: `translate3d(-50%, calc(-50% + ${(1 - enter) * 110 - exit * 80}px), 0)`,
-                }}
-              >
-                <span className="ks-eyebrow">[ ROTATION TURN 04 // APEX CONVERGENCE ]</span>
-                <h2 className="ks-turn-title">TO ACCOMPLISH</h2>
-              </div>
-            )
-          })()}
-
-          {/* ── 4 GLASS PROJECT RINGS HUD (52% to 76%) ── */}
-          {(() => {
-            const p = scrollProgress
-            const vis = p >= 0.52 && p < 0.76
-            if (!vis) return null
-            const t = (p - 0.52) / 0.24
-            const currentRing = p < 0.58 ? 1 : p < 0.64 ? 2 : p < 0.70 ? 3 : 4
-            return (
-              <div
-                className="kinetic-phrase ks-rings-hud"
-                style={{
-                  opacity: Math.min(t * 6, 1) * (1 - Math.max((t - 0.88) * 8, 0)),
-                }}
-              >
-                <div className="rings-hud-badge">
-                  <span className="hud-pulse" />
-                  <span className="hud-text">[ ASCENT FLIGHT // GLASS RING 0{currentRing}/04 ]</span>
-                </div>
-              </div>
-            )
-          })()}
-
-          {/* ── K5: 95–100% · Monumental blur-in convergence */}
-          {(() => {
-            const p = scrollProgress
-            const t = Math.min((p - 0.95) / 0.05, 1)
-            const vis = p >= 0.95
-            return vis ? (
-              <div
-                className="kinetic-phrase ks-monument"
-                style={{
-                  opacity: t,
-                  transform: `translate3d(-50%, -50%, 0) scale(${0.65 + t * 0.35})`,
-                  filter: `blur(${(1 - t) * 22}px)`,
-                }}
-              >
-                <span className="ks-eyebrow">AURELIA LABS</span>
-                <h2>BEYOND<br/>TOMORROW</h2>
-              </div>
-            ) : null
-          })()}
-
-        </div>
-      )}
-
-      {/* Fixed HUD Bars & Floating Narrative Overlays — in the GAPS between kinetic phrases */}
-      <div className={`scene-texts ${isEntered ? 'is-visible' : ''}`}>
-        {/* Left Tech Discipline Bar */}
-        <div className="left-bar">
-          <div className="parent">
-            <div className="cross" />
-            <div className="cross" />
-            <div className="cross" />
-            <div className="cross" />
-            <div className={`value ${activeDiscipline === 'AR' ? 'active' : ''}`}>AR</div>
-            <div className="cross" />
-            <div className="cross" />
-            <div className="cross" />
-            <div className="cross" />
-            <div className={`value ${activeDiscipline === '3D' ? 'active' : ''}`}>3D</div>
-            <div className="cross" />
-            <div className="cross" />
-            <div className="cross" />
-            <div className="cross" />
-            <div className={`value ${activeDiscipline === 'AI' ? 'active' : ''}`}>AI</div>
-            <div className="cross" />
-            <div className="cross" />
-            <div className="cross" />
-            <div className="cross" />
-            <div className={`value ${activeDiscipline === 'XR' ? 'active' : ''}`}>XR</div>
-            <div className="cross" />
-            <div className="cross" />
-            <div className="cross" />
-            <div className="cross" />
-          </div>
-        </div>
-
-        {/* Right Vertical Progress Bar */}
-        <div className="right-bar">
-          <div className="parent">
-            <img alt="icon" src="/images/icons/rightBar.svg" />
-            <p className="progress">{displayPercent}%</p>
-            <img alt="icon" src="/images/icons/rightBar.svg" />
-          </div>
-        </div>
-
-        {/* Floating Glass Showcase Cards — Narrative Models during the Ascent */}
-        <div className="wrapper">
-          {/* CARD 1: Left side (34%–50%) during info card phase */}
-          <div className={`glass-showcase-card side-card left-card ${scrollProgress >= 0.34 && scrollProgress < 0.50 ? 'is-active' : ''}`}>
-            <div className="glass-card-header">
-              <span className="glass-badge">DISCIPLINE 01 // SPATIAL ARCHITECTURE</span>
-              <span className="glass-sub">PHASE 01</span>
-            </div>
-            <h3 className="glass-card-title">Sculpted for wonder, engineered for performance.</h3>
-            <p className="glass-card-desc">Every project serves as testament to our commitment to innovation and artistic excellence. Spatial computing that breathes with real-time physics.</p>
-            <div className="glass-card-tags">
-              <span>WebGL 2.0</span>
-              <span>Spatial Audio</span>
-              <span>Procedural Shaders</span>
-            </div>
-            <div className="glass-card-actions" style={{ marginTop: '16px' }}>
-              <button
-                className="glass-action-btn"
-                onClick={() => {
-                  sound.playClick(1100)
-                  setIsWorkOpen(true)
-                }}
-              >
-                EXPLORE ARCHIVE →
-              </button>
-            </div>
-          </div>
-
-          {/* CARD 2: Right side (40%–51%) during info card phase */}
-          <div className={`glass-showcase-card side-card right-card ${scrollProgress >= 0.40 && scrollProgress < 0.51 ? 'is-active' : ''}`}>
-            <div className="glass-card-header">
-              <span className="glass-badge">DISCIPLINE 02 // CREATIVE ENGINEERING</span>
-              <span className="glass-sub">PHASE 02</span>
-            </div>
-            <h3 className="glass-card-title">A creative space where groundbreaking projects fuse design with technology.</h3>
-            <p className="glass-card-desc">Blurring boundaries between tactile sensory feedback and digital sculpture with bespoke procedural shaders and dynamic refraction.</p>
-            <div className="glass-card-tags">
-              <span>Dynamic Caustics</span>
-              <span>Fluid Simulation</span>
-              <span>XR Systems</span>
-            </div>
-          </div>
-
-          {/* CARD 3: Left side (76%–86%) during post-ring ascending flight */}
-          <div className={`glass-showcase-card side-card left-card ${scrollProgress >= 0.76 && scrollProgress < 0.86 ? 'is-active' : ''}`}>
-            <div className="glass-card-header">
-              <span className="glass-badge">AURELIA COLLECTIVE // RECOGNITION</span>
-              <span className="glass-sub">EST. 2026</span>
-            </div>
-            <h3 className="glass-card-title">Browse our portfolio — the magic we create with XR, AR, AI and 3D.</h3>
-            <div className="glass-metrics-grid">
-              <div className="metric-item"><strong>14x</strong><span>Awwwards SOTD</span></div>
-              <div className="metric-item"><strong>8x</strong><span>FWA of the Day</span></div>
-              <div className="metric-item"><strong>2.8M</strong><span>Global Reach</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* ==================================================================
+          THE SCROLL NARRATIVE
+            00–30%  ROTATE · the world turns, four words rise from below
+            30–58%  ASCEND · the jellyfish climbs past 3D word sculptures
+            58–82%  WORK   · four rotating glass project rings
+            82–100% ARRIVE · camera detaches and settles on AURELIA
+          ================================================================== */}
+      <ScrollNarrative isEntered={isEntered} />
 
 
       {/* 10,000px Virtual Scroll Track & Footer (ONLY rendered when entered) */}

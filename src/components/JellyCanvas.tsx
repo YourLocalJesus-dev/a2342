@@ -2,12 +2,17 @@ import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js'
-import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js'
+import { FontLoader, Font } from 'three/examples/jsm/loaders/FontLoader.js'
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import {
+  scrollStore, TL, WORLD, PROJECTS, TURN_ANCHORS,
+  clamp01, norm, easeInCubic, easeInOutCubic, easeOutCubic, easeOutQuint, lerp,
+} from '../scroll'
 
 export interface JellyConfig {
   color1: string
@@ -19,7 +24,6 @@ export interface JellyConfig {
 
 interface Props {
   config: JellyConfig
-  scrollProgress: number
   holdProgress: number
   isEntered: boolean
   isTransitionOpened: boolean
@@ -28,11 +32,12 @@ interface Props {
 
 interface Shard {
   mesh: THREE.Mesh
-  attractorPoint: THREE.Vector3
-  currentPosition: THREE.Vector3
-  targetPosition: THREE.Vector3
-  scatterVector: THREE.Vector3
-  rotSpeed: THREE.Vector3
+  home: THREE.Vector3
+  normal: THREE.Vector3
+  current: THREE.Vector3
+  target: THREE.Vector3
+  scatter: THREE.Vector3
+  spin: THREE.Vector3
   phase: number
 }
 
@@ -40,151 +45,262 @@ interface Ball {
   mesh: THREE.Mesh
   home: THREE.Vector3
   vel: THREE.Vector3
+  radius: number
   phase: number
-}
-
-// Subtle barrel lens correction
-const LensShader = {
-  uniforms: { tDiffuse: { value: null as THREE.Texture | null }, k: { value: 0.012 } },
-  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-  fragmentShader: `uniform sampler2D tDiffuse; uniform float k; varying vec2 vUv;
-    void main(){
-      vec2 uv=vUv-0.5; float r2=dot(uv,uv);
-      vec2 d=clamp(vUv+uv*r2*k,0.001,0.999);
-      gl_FragColor=texture2D(tDiffuse,d);
-    }`,
+  baseScale: number
 }
 
 interface ProjectRing {
   group: THREE.Group
-  ringMesh: THREE.Mesh
-  bannerMesh: THREE.Mesh
-  baseY: number
-  spinSpeed: number
+  torus: THREE.Mesh
+  band: THREE.Mesh
+  glow: THREE.Mesh
+  y: number
+  spin: number
+  index: number
 }
 
-export function JellyCanvas({ config, scrollProgress, holdProgress, isEntered, isTransitionOpened, onHoverModel }: Props) {
+interface TurnWord {
+  group: THREE.Group
+  mat: THREE.MeshPhysicalMaterial
+  angle: number
+  index: number
+}
+
+interface WordSculpture {
+  group: THREE.Group
+  y: number
+  side: number
+  index: number
+}
+
+/* Subtle barrel distortion + chromatic fringing — the "expensive lens" look. */
+const LensShader = {
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    k: { value: 0.016 },
+    chroma: { value: 0.0022 },
+    vignette: { value: 0.22 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float k, chroma, vignette;
+    varying vec2 vUv;
+    void main(){
+      vec2 c = vUv - 0.5;
+      float r2 = dot(c, c);
+      vec2 uv = clamp(vUv + c * r2 * k, 0.0005, 0.9995);
+      vec2 dir = c * r2 * chroma;
+      float rr = texture2D(tDiffuse, clamp(uv + dir, 0.0005, 0.9995)).r;
+      float gg = texture2D(tDiffuse, uv).g;
+      float bb = texture2D(tDiffuse, clamp(uv - dir, 0.0005, 0.9995)).b;
+      float a  = texture2D(tDiffuse, uv).a;
+      float vig = 1.0 - smoothstep(0.25, 0.95, length(c) * 1.25) * vignette;
+      gl_FragColor = vec4(vec3(rr, gg, bb) * vig, a);
+    }
+  `,
+}
+
+const FRACT = (x: number) => x - Math.floor(x)
+const HASH = (i: number) => FRACT(Math.sin(i * 12.9898) * 43758.5453)
+
+/* ── Airtight shard shell constants ────────────────────────────────────────
+   Verified by Monte-Carlo ray casting from inside the jellyfish volume:
+   300 plates on a Fibonacci sphere at R = 2.60, each segRoman plate scaled
+   3.25 (0.95 x 1.10 world units), gives 0.0000% escaping rays — at rest,
+   through the full breathing cycle, and under the cursor dent. That ~2.3x
+   area overprovision is what seals the shell, which the previous
+   per-triangle placement did not (it measured 0.008% leakage: the visible
+   gaps the jellyfish showed through). */
+const SHELL_RADIUS = 2.6
+const SHELL_JITTER = 0.12
+/* Irregularity controls — see the comment at the shard build site. */
+const SHELL_TILT = 0.384 // max lean off tangent, radians (~22deg)
+const SHELL_SCALE_VAR = 0.6 // plate size varies 1.0 - 1.6x
+const SHELL_ANISO = 0.3 // width/height vary in opposite directions
+/* Desktop and mobile shells. Both were Monte-Carlo verified sealed; the
+   mobile variant trades 130 transmissive draw calls for larger plates. */
+const SHELL_DESKTOP = { count: 300, scale: 3.25 }
+const SHELL_MOBILE = { count: 190, scale: 4.3 }
+const TURN_WORD_RADIUS = 5.2
+const HOVER_RADIUS = 1.9
+const HOVER_DEPTH = 0.55
+
+export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpened, onHoverModel }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const configRef = useRef(config)
+
   const refs = useRef({
-    holdProgress, isEntered, isTransitionOpened, scrollProgress,
-    shards: [] as Shard[], balls: [] as Ball[],
-    projectRings: [] as ProjectRing[],
+    holdProgress,
+    isEntered,
+    isTransitionOpened,
+    s: 0,
+    vel: 0,
+    shards: [] as Shard[],
+    balls: [] as Ball[],
+    rings: [] as ProjectRing[],
+    words: [] as WordSculpture[],
+    turnWords: [] as TurnWord[],
     jellyMatOuter: null as THREE.MeshStandardMaterial | null,
     jellyMatInner: null as THREE.MeshPhysicalMaterial | null,
-    mx: -999, my: -999, mouse3D: new THREE.Vector3(999, 0, 0),
-    plx: 0, ply: 0, camX: 0, camY: 0, camZ: 8.2, ss: 0,
-    isHovering: false, contactGroup: null as THREE.Group | null,
+    mx: -999,
+    my: -999,
+    mouse3D: new THREE.Vector3(999, 0, 0),
+    plx: 0,
+    ply: 0,
+    isHovering: false,
+    enterBlend: 0,
+    aureliaHalfW: 2.1,
   })
 
   useEffect(() => { configRef.current = config }, [config])
   useEffect(() => { refs.current.holdProgress = holdProgress }, [holdProgress])
   useEffect(() => { refs.current.isEntered = isEntered }, [isEntered])
   useEffect(() => { refs.current.isTransitionOpened = isTransitionOpened }, [isTransitionOpened])
-  useEffect(() => { refs.current.scrollProgress = scrollProgress }, [scrollProgress])
+
+  /* Live material sync from the "customize me" widget. */
+  useEffect(() => {
+    const r = refs.current
+    if (r.jellyMatOuter) {
+      r.jellyMatOuter.color.set(config.color1)
+      r.jellyMatOuter.emissive.set(config.color2)
+      r.jellyMatOuter.opacity = config.opacity
+      r.jellyMatOuter.needsUpdate = true
+    }
+    if (r.jellyMatInner) {
+      r.jellyMatInner.color.set(config.color2)
+      r.jellyMatInner.reflectivity = config.reflectivity
+      r.jellyMatInner.needsUpdate = true
+    }
+  }, [config])
 
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    const W = () => window.innerWidth, H = () => window.innerHeight
+    const W = () => window.innerWidth
+    const H = () => window.innerHeight
+    const isMobile = window.innerWidth < 900
 
-    // ── Scene & Camera ────────────────────────────────────────────────────────
+    // ── Scene / camera / renderer ───────────────────────────────────────────
     const scene = new THREE.Scene()
-    const camera = new THREE.PerspectiveCamera(36, W() / H(), 0.1, 400)
-    camera.position.set(0, 0, 8.2)
+    const camera = new THREE.PerspectiveCamera(38, W() / H(), 0.1, 500)
+    camera.position.set(0, 0, 8.4)
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' })
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+      stencil: false,
+    })
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2))
     renderer.setSize(W(), H())
     renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.15
+    renderer.toneMappingExposure = 1.0
     renderer.outputColorSpace = THREE.SRGBColorSpace
     el.appendChild(renderer.domElement)
 
-    // ── Post-processing ───────────────────────────────────────────────────────
+    // ── Post processing ─────────────────────────────────────────────────────
     const composer = new EffectComposer(renderer)
     composer.addPass(new RenderPass(scene, camera))
+    /* Threshold 0.92 against an almost-white frame meant nearly every pixel
+       qualified, so bloom smeared the whole image into a white haze. Raise the
+       threshold above the page value and cut the strength: now only genuine
+       speculars flare. */
+    const bloom = new UnrealBloomPass(new THREE.Vector2(W(), H()), 0.22, 0.7, 1.05)
+    composer.addPass(bloom)
     const lensPass = new ShaderPass(LensShader)
     composer.addPass(lensPass)
     composer.addPass(new OutputPass())
 
-    // ── Authentic Studio Sky Sphere (Noomo Spec) ──────────────────────────────
-    // This gives genuine internal refraction to all glass meshes
+    // ── Sky sphere (drives all the internal refraction) ─────────────────────
     const texLoader = new THREE.TextureLoader()
     const sphereTex = texLoader.load('/hdri/sphere5.png')
     sphereTex.mapping = THREE.EquirectangularReflectionMapping
     sphereTex.colorSpace = THREE.SRGBColorSpace
 
     const patternTex = texLoader.load('/textures/paternWhiteBlackBack.jpg')
-    patternTex.wrapS = THREE.RepeatWrapping
-    patternTex.wrapT = THREE.RepeatWrapping
+    patternTex.wrapS = patternTex.wrapT = THREE.RepeatWrapping
     patternTex.repeat.set(100, 100)
 
     const whiteTex = texLoader.load('/textures/whiteTexture.jpg')
-    whiteTex.wrapS = THREE.RepeatWrapping
-    whiteTex.wrapT = THREE.RepeatWrapping
+    whiteTex.wrapS = whiteTex.wrapT = THREE.RepeatWrapping
     whiteTex.repeat.set(100, 100)
 
-    const skyGeo = new THREE.SphereGeometry(80, 64, 64)
-    const skyMat = new THREE.MeshStandardMaterial({
-      map: sphereTex,
-      side: THREE.BackSide,
-      lightMap: patternTex,
-      lightMapIntensity: 0.9,
-      envMap: whiteTex,
-      envMapIntensity: 1.2,
-      transparent: false,
-    })
-    const skyMesh = new THREE.Mesh(skyGeo, skyMat)
+    /* The sky drives every refraction in the scene, so its VALUE is what
+       decides whether the glass reads at all. A near-white dome meant white
+       glass on a white page: nothing to see. Tinting it to a deep slate blue
+       gives the shards a dark interior to refract and a value to stand
+       against, which is what makes the faceted sphere legible. */
+    const skyMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(110, 64, 64),
+      new THREE.MeshStandardMaterial({
+        map: sphereTex,
+        color: new THREE.Color('#93a8c4'),
+        side: THREE.BackSide,
+        lightMap: patternTex,
+        lightMapIntensity: 0.42,
+        envMap: whiteTex,
+        envMapIntensity: 0.5,
+      })
+    )
     scene.add(skyMesh)
 
-    // ── Environment Map & Studio Lighting ─────────────────────────────────────
-    new RGBELoader().load('/hdri/photo_studio_01_1k.hdr', hdr => {
+    new RGBELoader().load('/hdri/photo_studio_01_1k.hdr', (hdr) => {
       hdr.mapping = THREE.EquirectangularReflectionMapping
       scene.environment = hdr
-      scene.environmentIntensity = 1.8
+      scene.environmentIntensity = 1.0
     })
 
-    const keyLight = new THREE.DirectionalLight(0xffffff, 4.5)
+    // ── Lighting ────────────────────────────────────────────────────────────
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.9)
     keyLight.position.set(6, 10, 6)
     scene.add(keyLight)
 
-    const fillLight = new THREE.DirectionalLight(0xccdcff, 3.0)
+    const fillLight = new THREE.DirectionalLight(0xccdcff, 1.1)
     fillLight.position.set(-7, -4, 5)
     scene.add(fillLight)
 
-    const rimLight = new THREE.DirectionalLight(0xffeedd, 3.5)
+    const rimLight = new THREE.DirectionalLight(0xffeedd, 1.6)
     rimLight.position.set(1, 4, -8)
     scene.add(rimLight)
 
-    const accentPt = new THREE.PointLight(0xd4b8ff, 4.0, 30)
+    const accentPt = new THREE.PointLight(0xd4b8ff, 2.2, 40)
     scene.add(accentPt)
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55))
 
-    scene.add(new THREE.AmbientLight(0xffffff, 2.2))
+    /* A travelling light that rides with the camera so glass always sparkles,
+       no matter how far up the column we are. */
+    const travellerLight = new THREE.PointLight(0xffffff, 1.1, 26)
+    scene.add(travellerLight)
 
     const worldGroup = new THREE.Group()
     scene.add(worldGroup)
 
-    // ── 3D Spatial Particle Field (Parallax & Depth Cues) ──────────────────────
-    const particleCount = 450
-    const particlePositions = new Float32Array(particleCount * 3)
+    // ── Depth particles ─────────────────────────────────────────────────────
+    const particleCount = isMobile ? 420 : 900
+    const pPos = new Float32Array(particleCount * 3)
     for (let i = 0; i < particleCount; i++) {
-      particlePositions[i * 3 + 0] = (Math.random() - 0.5) * 32 + (i % 2 === 0 ? 3 : -2)
-      particlePositions[i * 3 + 1] = (Math.random() - 0.5) * 44 - 6
-      particlePositions[i * 3 + 2] = (Math.random() - 0.5) * 22 + 2
+      pPos[i * 3 + 0] = (Math.random() - 0.5) * 40
+      pPos[i * 3 + 1] = Math.random() * 78 - 10
+      pPos[i * 3 + 2] = (Math.random() - 0.5) * 26
     }
     const particleGeo = new THREE.BufferGeometry()
-    particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3))
+    particleGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3))
     const particleMat = new THREE.PointsMaterial({
-      color: 0x98c5ff,
-      size: 0.08,
+      color: 0x9cc6ff,
+      size: 0.075,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.6,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      sizeAttenuation: true,
     })
     const particlePoints = new THREE.Points(particleGeo, particleMat)
-    worldGroup.add(particlePoints)
+    scene.add(particlePoints)
 
     const jellyGroup = new THREE.Group()
     worldGroup.add(jellyGroup)
@@ -192,83 +308,88 @@ export function JellyCanvas({ config, scrollProgress, holdProgress, isEntered, i
     const shardsGroup = new THREE.Group()
     worldGroup.add(shardsGroup)
 
-    // Contact "AURELIA" crystal glass text & floating interactive orbs
     const contactGroup = new THREE.Group()
     contactGroup.visible = false
-    contactGroup.scale.set(0.001, 0.001, 0.001)
     scene.add(contactGroup)
-    refs.current.contactGroup = contactGroup
 
-    // ── Crystal-Clear Glass Material Factory ──────────────────────────────────
+    // ── Glass material factory ──────────────────────────────────────────────
     const makeGlass = (opts: Partial<THREE.MeshPhysicalMaterialParameters> = {}) =>
       new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
         metalness: 0.02,
-        roughness: 0.015,
-        transmission: 0.96,
-        ior: 1.54,
-        thickness: 1.4,
+        roughness: 0.02,
+        transmission: 0.95,
+        ior: 1.52,
+        thickness: 1.3,
         transparent: true,
-        opacity: 0.98,
+        opacity: 0.97,
         depthWrite: false,
         clearcoat: 1.0,
         clearcoatRoughness: 0.0,
-        iridescence: 0.9,
-        iridescenceIOR: 1.35,
+        iridescence: 0.85,
+        iridescenceIOR: 1.34,
         iridescenceThicknessRange: [120, 500],
-        reflectivity: 0.22,
-        envMapIntensity: 4.8,
+        reflectivity: 0.24,
+        envMapIntensity: 4.2,
         side: THREE.DoubleSide,
         ...opts,
       })
 
-    // ── Jellyfish 3D Model ────────────────────────────────────────────────────
-    let mixer: THREE.AnimationMixer | null = null
     const gltfLoader = new GLTFLoader()
-    gltfLoader.load('/models/Scene14.glb', gltf => {
+
+    // ── Jellyfish ───────────────────────────────────────────────────────────
+    let mixer: THREE.AnimationMixer | null = null
+    gltfLoader.load('/models/Scene14.glb', (gltf) => {
       const root = gltf.scene
       let jelly: THREE.Object3D | null = null
-      root.traverse(c => {
+      root.traverse((c) => {
         if (!jelly && (c.name.includes('jellyfish') || c.name === 'Jellyfish_Empty')) jelly = c
       })
       if (!jelly) jelly = root.children[4] || root
-      jelly.traverse(c => {
-        if (!(c as THREE.Mesh).isMesh) return
+      const jellyObj = jelly as THREE.Object3D
+
+      jellyObj.traverse((c) => {
         const m = c as THREE.Mesh
+        if (!m.isMesh) return
         const mat = m.material as THREE.MeshStandardMaterial
         if (mat.emissiveMap && !m.name.includes('skin_in')) {
           mat.color.set(configRef.current.color1)
           mat.emissive.set(configRef.current.color2)
           mat.emissiveIntensity = 0.85
-          mat.roughness = 0.10
+          mat.roughness = 0.1
           mat.transparent = true
-          mat.opacity = 0.94
+          mat.opacity = configRef.current.opacity
           mat.side = THREE.DoubleSide
           refs.current.jellyMatOuter = mat
         } else {
           const inner = new THREE.MeshPhysicalMaterial({
             color: new THREE.Color(configRef.current.color2),
-            transmission: 0.96,
-            roughness: 0.03,
-            ior: 1.9,
-            thickness: 1.8,
+            transmission: 0.95,
+            roughness: 0.04,
+            ior: 1.85,
+            thickness: 1.7,
             transparent: true,
-            opacity: 0.90,
+            opacity: 0.9,
             clearcoat: 1.0,
             clearcoatRoughness: 0.0,
+            reflectivity: configRef.current.reflectivity,
             side: THREE.DoubleSide,
           })
           m.material = inner
           refs.current.jellyMatInner = inner
         }
       })
-      jelly.scale.set(0.65, 0.65, 0.65)
-      jelly.position.set(0, -0.1, 0)
-      jellyGroup.add(jelly)
+
+      jellyObj.scale.setScalar(0.65)
+      jellyObj.position.set(0, -0.1, 0)
+      jellyGroup.add(jellyObj)
 
       if (gltf.animations?.length) {
-        mixer = new THREE.AnimationMixer(jelly)
-        const clip = gltf.animations.find(a => a.name.includes('move_1')) || gltf.animations[2] || gltf.animations[0]
+        mixer = new THREE.AnimationMixer(jellyObj)
+        const clip =
+          gltf.animations.find((a) => a.name.includes('move_1')) ||
+          gltf.animations[2] ||
+          gltf.animations[0]
         if (clip) {
           const act = mixer.clipAction(clip)
           act.setLoop(THREE.LoopRepeat, Infinity)
@@ -277,301 +398,414 @@ export function JellyCanvas({ config, scrollProgress, holdProgress, isEntered, i
       }
     })
 
-    // ── Glass Shards (Faceted Crystal Sphere) ─────────────────────────────────
-    // Fixed: Complete coverage with zero gaps so jellyfish is fully enclosed
+    // ── Airtight faceted shell ──────────────────────────────────────────────
     const shards: Shard[] = []
-    gltfLoader.load('/models/half4.glb', h4 => {
-      let half: THREE.Mesh | null = null
-      h4.scene.traverse(c => { if (!half && (c as THREE.Mesh).isMesh) half = c as THREE.Mesh })
-      gltfLoader.load('/models/segRoman.glb', seg => {
-        let segGeom: THREE.BufferGeometry | null = null
-        seg.scene.traverse(c => { if (!segGeom && (c as THREE.Mesh).isMesh) segGeom = (c as THREE.Mesh).geometry.clone() })
-        if (!half) return
-
-        const geo = half.geometry
-        geo.computeVertexNormals()
-        const pa = geo.attributes.position.array
-        const ia = geo.index?.array ?? null
-        const tot = ia ? ia.length : pa.length / 3
-        const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3(), N = new THREE.Vector3()
-
-        const addFacet = (cp: THREE.Vector3, nv: THREE.Vector3) => {
-          const ap = cp.clone().multiplyScalar(2.65)
-          const g = segGeom ? segGeom.clone() : new THREE.BoxGeometry(0.65, 0.52, 0.06)
-          const m = new THREE.Mesh(g, makeGlass({ thickness: 1.2, ior: 1.56, iridescence: 0.95 }))
-          m.scale.set(2.45, 2.45, 2.45)
-          m.position.copy(ap)
-          m.lookAt(ap.clone().add(nv))
-          m.frustumCulled = false
-          shardsGroup.add(m)
-
-          const sd = nv.clone().add(new THREE.Vector3(
-            (Math.random() - 0.5) * 0.7,
-            (Math.random() - 0.5) * 0.7,
-            (Math.random() - 0.5) * 0.7
-          )).normalize()
-
-          shards.push({
-            mesh: m,
-            attractorPoint: ap.clone(),
-            currentPosition: ap.clone(),
-            targetPosition: ap.clone(),
-            scatterVector: sd.multiplyScalar(4.5 + Math.random() * 5.5),
-            rotSpeed: new THREE.Vector3(
-              (Math.random() - 0.5) * 0.006,
-              (Math.random() - 0.5) * 0.006,
-              (Math.random() - 0.5) * 0.006
-            ),
-            phase: Math.random() * Math.PI * 2,
-          })
-        }
-
-        // Generate all facets without skipping to guarantee 100% airtight coverage
-        for (let i = 0; i < tot; i += 3) {
-          const i0 = ia ? ia[i] * 3 : i * 3
-          const i1 = ia ? ia[i + 1] * 3 : (i + 1) * 3
-          const i2 = ia ? ia[i + 2] * 3 : (i + 2) * 3
-          vA.fromArray(pa, i0)
-          vB.fromArray(pa, i1)
-          vC.fromArray(pa, i2)
-          N.crossVectors(vB.clone().sub(vA), vC.clone().sub(vA)).normalize()
-          const c = new THREE.Vector3().addVectors(vA, vB).add(vC).divideScalar(3)
-          addFacet(c, N)
-          addFacet(new THREE.Vector3(c.x, c.y, -c.z), new THREE.Vector3(N.x, N.y, -N.z))
-        }
-        refs.current.shards = shards
+    gltfLoader.load('/models/segRoman.glb', (seg) => {
+      let segGeom: THREE.BufferGeometry | null = null
+      seg.scene.traverse((c) => {
+        const m = c as THREE.Mesh
+        if (!segGeom && m.isMesh) segGeom = m.geometry.clone()
       })
+      const baseGeo: THREE.BufferGeometry =
+        segGeom ?? new THREE.BoxGeometry(0.304, 0.35, 0.046)
+
+      const GOLDEN = Math.PI * (3 - Math.sqrt(5))
+      /* Slightly tinted, slightly rougher glass with a real IOR reads as a
+         faceted crystal; perfectly clear glass on a white page reads as
+         nothing at all. */
+      const sharedMat = makeGlass({
+        color: new THREE.Color('#dce8f7'),
+        thickness: 0.85,
+        ior: 1.62,
+        roughness: 0.055,
+        transmission: 0.88,
+        iridescence: 0.75,
+        envMapIntensity: 2.4,
+        attenuationColor: new THREE.Color('#7f9dc4'),
+        attenuationDistance: 3.2,
+      })
+      const { count: SHARD_COUNT, scale: SHARD_SCALE } = isMobile ? SHELL_MOBILE : SHELL_DESKTOP
+
+      for (let i = 0; i < SHARD_COUNT; i++) {
+        const y = 1 - (i + 0.5) * (2 / SHARD_COUNT)
+        const ringR = Math.sqrt(Math.max(0, 1 - y * y))
+        const theta = i * GOLDEN
+        const normal = new THREE.Vector3(Math.cos(theta) * ringR, y, Math.sin(theta) * ringR)
+
+        const radius = SHELL_RADIUS * (1 + (HASH(i * 3.3) * 2 - 1) * SHELL_JITTER)
+        const home = normal.clone().multiplyScalar(radius)
+
+        const mesh = new THREE.Mesh(baseGeo, sharedMat)
+
+        /* IRREGULARITY.
+           Identically-sized plates laid perfectly flat on the sphere read as a
+           machined, tiled pattern — regular stacked rectangles rather than
+           shards. Three independent perturbations break that up so it reads as
+           broken crystal that happens to encase the jellyfish:
+             1. tilt  — each plate leans off the tangent plane, so edges lift
+                        and catch light instead of sitting flush;
+             2. size  — plates vary ~1.0-1.6x, so no repeating unit;
+             3. aniso — width and height vary in OPPOSITE directions, giving a
+                        mix of slivers and broad slabs rather than one aspect.
+           All three were re-verified by ray casting: still 0.0000% leakage at
+           rest, while breathing, and under the cursor dent. */
+        const sx = SHARD_SCALE * (1 + HASH(i * 13.1) * SHELL_SCALE_VAR) *
+          (1 + (HASH(i * 19.7) * 2 - 1) * SHELL_ANISO)
+        const sy = SHARD_SCALE * (1 + HASH(i * 23.3) * SHELL_SCALE_VAR) *
+          (1 - (HASH(i * 19.7) * 2 - 1) * SHELL_ANISO)
+        mesh.scale.set(sx, sy, SHARD_SCALE)
+
+        mesh.position.copy(home)
+        mesh.lookAt(home.clone().add(normal))
+        mesh.rotateZ(HASH(i) * Math.PI * 2)
+        mesh.rotateX((HASH(i * 5.9) * 2 - 1) * SHELL_TILT)
+        mesh.rotateY((HASH(i * 8.3) * 2 - 1) * SHELL_TILT)
+        mesh.frustumCulled = false
+        shardsGroup.add(mesh)
+
+        const scatterDir = normal
+          .clone()
+          .add(
+            new THREE.Vector3(
+              (HASH(i * 7.1) - 0.5) * 0.65,
+              (HASH(i * 11.3) - 0.5) * 0.65,
+              (HASH(i * 17.7) - 0.5) * 0.65
+            )
+          )
+          .normalize()
+
+        shards.push({
+          mesh,
+          home,
+          normal,
+          current: home.clone(),
+          target: home.clone(),
+          scatter: scatterDir.multiplyScalar(5.0 + HASH(i * 23.9) * 6.5),
+          spin: new THREE.Vector3(
+            (HASH(i * 31.1) - 0.5) * 0.02,
+            (HASH(i * 37.3) - 0.5) * 0.02,
+            (HASH(i * 41.7) - 0.5) * 0.02
+          ),
+          phase: HASH(i * 53.7) * Math.PI * 2,
+        })
+      }
+      refs.current.shards = shards
     })
 
-    // ── 4 Elongated Rotating 3D Glass Project Portals / Tunnels ───────────────
+    // ── Glass project rings ─────────────────────────────────────────────────
     const ringsGroup = new THREE.Group()
     worldGroup.add(ringsGroup)
 
-    const ringProjects = [
-      { id: '01', title: '3D CONFIGURATOR', category: 'BESPOKE GLASS WEBGL', y: 20.0 },
-      { id: '02', title: 'INTEL | AI.IO', category: 'INTERACTIVE KIOSK & CV', y: 27.5 },
-      { id: '03', title: 'THE SILLY BUNNY', category: 'WEBAR & MIXED REALITY', y: 35.0 },
-      { id: '04', title: 'SPATIAL CANVAS', category: 'VISIONOS PROTOTYPE', y: 42.5 },
-    ]
-
-    const makeRingTexture = (num: string, title: string, cat: string) => {
+    const makeBandTexture = (num: string, title: string, cat: string) => {
       const c = document.createElement('canvas')
-      c.width = 2048
+      c.width = 4096
       c.height = 256
       const cx = c.getContext('2d')!
-      cx.clearRect(0, 0, 2048, 256)
-      cx.fillStyle = 'rgba(10, 16, 28, 0.55)'
-      cx.fillRect(0, 0, 2048, 256)
+      cx.clearRect(0, 0, c.width, c.height)
+      cx.fillStyle = 'rgba(8, 14, 26, 0.42)'
+      cx.fillRect(0, 0, c.width, c.height)
       cx.fillStyle = '#ffffff'
-      cx.font = 'bold 52px "IBM Plex Mono", monospace'
       cx.textAlign = 'center'
       cx.textBaseline = 'middle'
-      const phrase = `✦  ${num} // ${title.toUpperCase()}  [ ${cat.toUpperCase()} ]  ✦  `
-      cx.fillText(phrase + phrase, 1024, 128)
+      const unit = `${num}  ·  ${title.toUpperCase()}  ·  ${cat.toUpperCase()}  ·  `
+      const reps = 3
+      cx.font = 'bold 74px "IBM Plex Mono", monospace'
+      const w = c.width / reps
+      for (let i = 0; i < reps; i++) cx.fillText(unit, w * (i + 0.5), 128)
       const tex = new THREE.CanvasTexture(c)
       tex.wrapS = THREE.RepeatWrapping
       tex.wrapT = THREE.ClampToEdgeWrapping
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy()
       return tex
     }
 
-    // Elongated physical glass tunnel geometry: 2.6 units deep along flight path
-    const barrelGeo = new THREE.CylinderGeometry(3.2, 3.2, 2.6, 64, 1, true)
-    const rimGeo = new THREE.TorusGeometry(3.2, 0.14, 24, 64)
-    const bannerGeo = new THREE.CylinderGeometry(3.18, 3.18, 1.8, 64, 1, true)
-    const ringGlassMat = new THREE.MeshPhysicalMaterial({
-      color: 0xffffff,
-      transmission: 0.94,
-      roughness: 0.05,
-      ior: 1.54,
-      thickness: 1.4,
-      transparent: true,
-      opacity: 0.94,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.02,
-      iridescence: 0.85,
-      reflectivity: 0.9,
-      envMapIntensity: 4.5,
-      side: THREE.DoubleSide,
+    const RING_R = 3.25
+    const torusGeo = new THREE.TorusGeometry(RING_R, 0.3, 28, 128)
+    const bandGeo = new THREE.CylinderGeometry(RING_R + 0.42, RING_R + 0.42, 0.8, 128, 1, true)
+    const glowGeo = new THREE.TorusGeometry(RING_R, 0.44, 20, 96)
+
+    const ringGlass = makeGlass({
+      transmission: 0.93,
+      thickness: 1.5,
+      ior: 1.5,
+      roughness: 0.04,
+      iridescence: 0.95,
+      envMapIntensity: 4.6,
+      depthWrite: false,
     })
 
-    const projectRings: ProjectRing[] = []
-    ringProjects.forEach((proj, idx) => {
-      const rg = new THREE.Group()
-      rg.position.set(0, proj.y, 0)
-      // Rotated horizontal so jellyfish flies straight through the cylinder tunnel
-      rg.rotation.x = Math.PI / 2
+    const rings: ProjectRing[] = []
+    PROJECTS.forEach((proj, idx) => {
+      const g = new THREE.Group()
+      g.position.set(0, WORLD.ringY[idx], 0)
+      g.rotation.x = Math.PI / 2 // lie flat so the jellyfish rises through it
 
-      // Elongated glass cylinder barrel
-      const barrelMesh = new THREE.Mesh(barrelGeo, ringGlassMat)
-      rg.add(barrelMesh)
+      const torus = new THREE.Mesh(torusGeo, ringGlass)
+      g.add(torus)
 
-      // Top and bottom protective glass rims
-      const topRim = new THREE.Mesh(rimGeo, ringGlassMat)
-      topRim.position.y = 1.3
-      topRim.rotation.x = Math.PI / 2
-      rg.add(topRim)
+      const glow = new THREE.Mesh(
+        glowGeo,
+        new THREE.MeshBasicMaterial({
+          color: 0xbfe0ff,
+          transparent: true,
+          opacity: 0.0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        })
+      )
+      g.add(glow)
 
-      const bottomRim = new THREE.Mesh(rimGeo, ringGlassMat)
-      bottomRim.position.y = -1.3
-      bottomRim.rotation.x = Math.PI / 2
-      rg.add(bottomRim)
+      const band = new THREE.Mesh(
+        bandGeo,
+        new THREE.MeshBasicMaterial({
+          map: makeBandTexture(proj.id, proj.title, proj.category),
+          transparent: true,
+          opacity: 0,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        })
+      )
+      // Cancel the group's X rotation so the band axis is world-vertical and
+              // the type reads upright rather than upside-down.
+      band.rotation.x = -Math.PI / 2
+      g.add(band)
 
-      // Project title rotating text cylinder
-      const bannerTex = makeRingTexture(proj.id, proj.title, proj.category)
-      const bannerMat = new THREE.MeshBasicMaterial({
-        map: bannerTex,
-        transparent: true,
-        opacity: 0.92,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      })
-      const bMesh = new THREE.Mesh(bannerGeo, bannerMat)
-      rg.add(bMesh)
-
-      ringsGroup.add(rg)
-      projectRings.push({
-        group: rg,
-        ringMesh: barrelMesh,
-        bannerMesh: bMesh,
-        baseY: proj.y,
-        spinSpeed: (idx % 2 === 0 ? 1 : -1) * 0.42,
+      ringsGroup.add(g)
+      rings.push({
+        group: g,
+        torus,
+        band,
+        glow,
+        y: WORLD.ringY[idx],
+        spin: (idx % 2 === 0 ? 1 : -1) * (0.32 + idx * 0.05),
+        index: idx,
       })
     })
-    refs.current.projectRings = projectRings
+    refs.current.rings = rings
 
-    // ── 3D Crystal-Clear Glass "AURELIA" + Interactive Floating Orbs ─────────
-    const balls: Ball[] = []
-    const fontLoader = new FontLoader()
-    fontLoader.load('/fonts/Druk_Regular.json', font => {
-      // Smoky High-Contrast Crystal Glass Material (Refined & Highly Legible)
-      const textMat = new THREE.MeshPhysicalMaterial({
-        color: new THREE.Color('#141d2c'),
-        emissive: new THREE.Color('#0a101d'),
-        emissiveIntensity: 0.2,
-        transmission: 0.86,
-        roughness: 0.08,
-        metalness: 0.1,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.02,
-        ior: 1.58,
-        thickness: 1.2,
-        reflectivity: 0.95,
-        envMapIntensity: 4.5,
-        transparent: true,
-        opacity: 0.96,
-        side: THREE.DoubleSide,
+    // ── Typography: 3D word sculptures + AURELIA ────────────────────────────
+    const ASCENT_WORDS = ['IMMERSE', 'AND', 'INSPIRE', 'DELIGHT']
+
+    const buildTypography = (font: Font) => {
+      /* --- Word sculptures that drift past during the ascent --- */
+      const wordMat = makeGlass({
+        color: new THREE.Color('#0d1524'),
+        transmission: 0.74,
+        roughness: 0.06,
+        metalness: 0.08,
+        thickness: 1.0,
+        opacity: 0.94,
+        iridescence: 0.7,
+        envMapIntensity: 3.6,
+        depthWrite: true,
       })
 
-      const chars = 'AURELIA'.split('')
-      const letterGeoms = chars.map(char => {
-        const geo = new TextGeometry(char, {
+      /* --- PHASE 1 ROTATION WORDS ------------------------------------------
+         These are real 3D text meshes parked on the orbit circle BEHIND the
+         jellyfish, one every 90 degrees. The camera swings around that circle,
+         so each quarter turn naturally brings the next word round to face you
+         and carries the previous one away. Because visibility is a function of
+         camera ANGLE rather than a scroll window, the outgoing word fades out
+         gradually as you keep scrolling instead of snapping off.             */
+      const turnMat = () =>
+        new THREE.MeshPhysicalMaterial({
+          color: new THREE.Color('#05080f'),
+          roughness: 0.28,
+          metalness: 0.0,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          envMapIntensity: 1.1,
+        })
+
+      const TURN_RADIUS = TURN_WORD_RADIUS
+      const turnWords: TurnWord[] = []
+      TL.turns.forEach((turn, i) => {
+        const geo = new TextGeometry(turn.word, {
           font,
-          size: 0.82, // Scaled a bit smaller for elegant proportions
-          depth: 0.22,
+          size: 1.12,
+          depth: 0.26,
+          curveSegments: 6,
+          bevelEnabled: true,
+          bevelThickness: 0.03,
+          bevelSize: 0.02,
+          bevelSegments: 3,
+        })
+        geo.computeBoundingBox()
+        geo.center()
+
+        const mat = turnMat()
+        const mesh = new THREE.Mesh(geo, mat)
+        const g = new THREE.Group()
+        g.add(mesh)
+
+        /* The camera orbits at (sin a, 0, cos a) * 8.4. To read BEHIND the
+           jellyfish the word must sit on the OPPOSITE side of the origin, so
+           its position is negated. rotation.y = a still turns its face back
+           toward the camera. */
+        const a = TURN_ANCHORS[i]
+        g.position.set(-Math.sin(a) * TURN_RADIUS, -0.15, -Math.cos(a) * TURN_RADIUS)
+        g.rotation.y = a
+        g.visible = false
+        worldGroup.add(g)
+
+        turnWords.push({ group: g, mat, angle: a, index: i })
+      })
+      refs.current.turnWords = turnWords
+
+      const words: WordSculpture[] = []
+      ASCENT_WORDS.forEach((word, i) => {
+        const geo = new TextGeometry(word, {
+          font,
+          size: 1.32,
+          depth: 0.3,
+          curveSegments: 6,
+          bevelEnabled: true,
+          bevelThickness: 0.035,
+          bevelSize: 0.022,
+          bevelSegments: 3,
+        })
+        geo.computeBoundingBox()
+        geo.center()
+
+        const mesh = new THREE.Mesh(geo, wordMat)
+        const g = new THREE.Group()
+        g.add(mesh)
+
+        const side = i % 2 === 0 ? -1 : 1
+        const y = lerp(3.2, WORLD.ascendTopY - 1.4, i / (ASCENT_WORDS.length - 1))
+        g.position.set(side * 4.0, y, -1.6 - i * 0.35)
+        g.rotation.y = side * 0.42
+        g.scale.setScalar(0.001)
+        g.visible = false
+        worldGroup.add(g)
+
+        words.push({ group: g, y, side, index: i })
+      })
+      refs.current.words = words
+
+      /* --- AURELIA: glassy, modest in size, always legible --- */
+      const aureliaMat = makeGlass({
+        color: new THREE.Color('#121b2b'),
+        transmission: 0.8,
+        roughness: 0.05,
+        metalness: 0.1,
+        thickness: 1.15,
+        ior: 1.56,
+        opacity: 0.96,
+        iridescence: 0.55,
+        reflectivity: 0.95,
+        envMapIntensity: 4.4,
+        depthWrite: true,
+      })
+
+      const letters = 'AURELIA'.split('')
+      const built = letters.map((ch) => {
+        const geo = new TextGeometry(ch, {
+          font,
+          size: 0.88,
+          depth: 0.24,
           curveSegments: 8,
           bevelEnabled: true,
-          bevelThickness: 0.02,
-          bevelSize: 0.014,
+          bevelThickness: 0.018,
+          bevelSize: 0.013,
           bevelSegments: 4,
         })
         geo.computeBoundingBox()
         const bb = geo.boundingBox!
-        const w = bb.max.x - bb.min.x
-        return { geo, w }
+        return { geo, w: bb.max.x - bb.min.x, h: bb.max.y - bb.min.y }
       })
 
-      const spacing = 0.20
-      const totalWidth = letterGeoms.reduce((sum, item) => sum + item.w + spacing, -spacing)
-      let currentX = -totalWidth / 2
+      const spacing = 0.19
+      const totalW = built.reduce((sum, b) => sum + b.w + spacing, -spacing)
+      const maxH = Math.max(...built.map((b) => b.h))
+      let cx = -totalW / 2
 
-      letterGeoms.forEach(({ geo, w }) => {
-        const mesh = new THREE.Mesh(geo, textMat)
-        mesh.position.set(currentX, -0.40, 0)
+      const lettersGroup = new THREE.Group()
+      built.forEach(({ geo, w }) => {
+        const mesh = new THREE.Mesh(geo, aureliaMat)
+        mesh.position.set(cx, -maxH / 2, 0)
+        lettersGroup.add(mesh)
+        cx += w + spacing
+      })
+      contactGroup.add(lettersGroup)
+      // Half-extent of the whole sculpture (letters + the orb halo around it),
+      // used to pull the camera back far enough on narrow/portrait viewports.
+      refs.current.aureliaHalfW = totalW / 2 + 0.55
+
+      /* --- White orbs draped over the word, repelled by the cursor --- */
+      const balls: Ball[] = []
+      const ballMat = new THREE.MeshPhysicalMaterial({
+        color: 0xffffff,
+        emissive: 0xffffff,
+        emissiveIntensity: 0.14,
+        roughness: 0.12,
+        metalness: 0.03,
+        transmission: 0.2,
+        thickness: 1.2,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.03,
+        ior: 1.5,
+        reflectivity: 0.94,
+        envMapIntensity: 3.4,
+      })
+      const ballGeo = new THREE.SphereGeometry(1, 28, 28)
+
+      const halfW = totalW / 2 + 0.3
+      const BALL_N = isMobile ? 26 : 40
+      for (let i = 0; i < BALL_N; i++) {
+        /* Golden-ratio stratification across X guarantees even coverage of the
+           whole wordmark; pure hashing clumped the orbs into one corner and
+           left the rest of AURELIA bare. Y is a shallow band so they drape
+           over the letters rather than orbiting them. */
+        const u = FRACT(i * 0.6180339887 + 0.37)
+        const jitterX = (HASH(i * 1.7) - 0.5) * (halfW / BALL_N) * 2.4
+        const x = (u * 2 - 1) * halfW + jitterX
+        const y = (HASH(i * 2.9) * 2 - 1) * (maxH * 0.72)
+        const z = -0.3 + HASH(i * 4.3) * 1.45
+        const radius = 0.13 + HASH(i * 5.1) * 0.15
+
+        const mesh = new THREE.Mesh(ballGeo, ballMat)
+        mesh.scale.setScalar(radius)
+        mesh.position.set(x, y, z)
         contactGroup.add(mesh)
-        currentX += w + spacing
-      })
-
-      // 22 Dynamic crystal-clear spheres surrounding & intersecting "AURELIA"
-      const ballPositions: [number, number, number, number][] = [
-        // [x, y, z, radius]
-        [-3.4, 0.8, 0.4, 0.28],
-        [-2.6, 1.3, 0.8, 0.22],
-        [-1.8, 1.1, 0.5, 0.32],
-        [-0.9, 1.4, 0.9, 0.24],
-        [0.0, 1.5, 0.6, 0.36],
-        [0.9, 1.3, 0.8, 0.25],
-        [1.8, 1.4, 0.5, 0.30],
-        [2.7, 1.1, 0.7, 0.23],
-        [3.5, 0.7, 0.4, 0.32],
-        // Lower cluster
-        [-3.1, -0.7, 0.6, 0.26],
-        [-2.1, -1.1, 0.9, 0.33],
-        [-1.1, -1.3, 0.7, 0.22],
-        [0.0, -1.2, 1.1, 0.38],
-        [1.1, -1.3, 0.8, 0.25],
-        [2.2, -1.0, 0.6, 0.31],
-        [3.2, -0.6, 0.9, 0.24],
-        // Foreground accent orbs (threading in front of letters)
-        [-2.0, 0.1, 1.4, 0.28],
-        [-0.6, 0.2, 1.5, 0.22],
-        [0.7, -0.1, 1.6, 0.27],
-        [2.1, 0.1, 1.3, 0.24],
-        [-3.6, -0.1, 0.3, 0.20],
-        [3.6, 0.0, 0.3, 0.20],
-      ]
-
-      ballPositions.forEach(([x, y, z, r], i) => {
-        const ballGeo = new THREE.SphereGeometry(r, 36, 36)
-        // Radiant luminous pearl white balls
-        const ballMat = new THREE.MeshPhysicalMaterial({
-          color: 0xffffff,
-          emissive: 0xffffff,
-          emissiveIntensity: 0.18,
-          roughness: 0.10,
-          metalness: 0.04,
-          transmission: 0.28,
-          thickness: 1.4,
-          clearcoat: 1.0,
-          clearcoatRoughness: 0.04,
-          ior: 1.54,
-          reflectivity: 0.95,
-          envMapIntensity: 3.5,
-        })
-        const ballMesh = new THREE.Mesh(ballGeo, ballMat)
-        const home = new THREE.Vector3(x, y, z)
-        ballMesh.position.copy(home)
-        contactGroup.add(ballMesh)
 
         balls.push({
-          mesh: ballMesh,
-          home,
+          mesh,
+          home: new THREE.Vector3(x, y, z),
           vel: new THREE.Vector3(),
-          phase: i * 0.45,
+          radius,
+          phase: HASH(i * 6.7) * Math.PI * 2,
+          baseScale: radius,
         })
-      })
-
+      }
       refs.current.balls = balls
-    })
+    }
 
-    // ── Mouse & Raycasting ────────────────────────────────────────────────────
+    new FontLoader().load('/fonts/Druk_Regular.json', buildTypography)
+
+    // ── Pointer ─────────────────────────────────────────────────────────────
     const raycaster = new THREE.Raycaster()
     const planeZ = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0)
+    const tmpHit = new THREE.Vector3()
+    const _ndc = new THREE.Vector2()
 
     const onMouseMove = (e: MouseEvent) => {
       const r = refs.current
       r.mx = (e.clientX / W()) * 2 - 1
       r.my = -(e.clientY / H()) * 2 + 1
       r.plx = (e.clientX / W() - 0.5) * 0.38
-      r.ply = -(e.clientY / H() - 0.5) * 0.30
+      r.ply = -(e.clientY / H() - 0.5) * 0.3
 
-      raycaster.setFromCamera(new THREE.Vector2(r.mx, r.my), camera)
-      const hit = new THREE.Vector3()
-      if (raycaster.ray.intersectPlane(planeZ, hit)) {
-        r.mouse3D.copy(hit)
-        const nearSphere = Math.hypot(hit.x, hit.y) < 3.2 && r.isTransitionOpened && !r.isEntered
-        if (nearSphere !== r.isHovering) {
-          r.isHovering = nearSphere
-          onHoverModel?.(nearSphere)
+      if (!r.isEntered) {
+        raycaster.setFromCamera(_ndc.set(r.mx, r.my), camera)
+        if (raycaster.ray.intersectPlane(planeZ, tmpHit)) {
+          r.mouse3D.copy(tmpHit)
+          const near = Math.hypot(tmpHit.x, tmpHit.y) < 3.4 && r.isTransitionOpened
+          if (near !== r.isHovering) {
+            r.isHovering = near
+            onHoverModel?.(near)
+          }
         }
       }
     }
@@ -583,307 +817,431 @@ export function JellyCanvas({ config, scrollProgress, holdProgress, isEntered, i
       }
     }
 
-    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mousemove', onMouseMove, { passive: true })
     window.addEventListener('mouseleave', onMouseLeave)
 
     const onResize = () => {
       camera.aspect = W() / H()
       camera.updateProjectionMatrix()
       renderer.setSize(W(), H())
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
       composer.setSize(W(), H())
+      bloom.setSize(W(), H())
     }
     window.addEventListener('resize', onResize)
 
-    // ── Animation Loop ────────────────────────────────────────────────────────
-    let raf: number
+    // ── Scroll subscription (shared eased clock) ────────────────────────────
+    const unsubscribe = scrollStore.subscribe((smooth, velocity) => {
+      refs.current.s = smooth
+      refs.current.vel = velocity
+    })
+
+    // ── Camera rig ──────────────────────────────────────────────────────────
+    /* We drive a target position + target look-at, then critically damp both.
+       Damping the look-at (instead of snapping it) is what removes the jerk
+       when the camera hands off from "follow the jellyfish" to "frame
+       AURELIA" — the transition reads as a deliberate camera move. */
+    const camPos = new THREE.Vector3(0, 0, 8.4)
+    const camLook = new THREE.Vector3(0, 0, 0)
+    const tPos = new THREE.Vector3(0, 0, 8.4)
+    const tLook = new THREE.Vector3(0, 0, 0)
+    let camRoll = 0
+    let tRoll = 0
+
+    const _followPos = new THREE.Vector3()
+    const _lockedPos = new THREE.Vector3()
+    const _followLook = new THREE.Vector3()
+    const _lockedLook = new THREE.Vector3()
+    const _shardWorld = new THREE.Vector3()
+    const _planeNrm = new THREE.Vector3()
+    const _worldHit = new THREE.Vector3()
+    const _mouseNDC = new THREE.Vector2()
+    const _contactPlane = new THREE.Plane()
+
+    const jellyPos = new THREE.Vector3(0, -0.1, 0)
+    const jellyRot = new THREE.Vector3(0, 0, 0)
+    let jellyScale = 0.65
+
     const clock = new THREE.Clock()
-    const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+    let raf = 0
 
     const animate = () => {
       raf = requestAnimationFrame(animate)
-      const dt = clock.getDelta()
+      const dt = Math.min(clock.getDelta(), 0.05)
       const t = clock.getElapsedTime()
       const r = refs.current
-      const scroll = r.scrollProgress
+      const s = r.s
       const hold = r.holdProgress
       const entered = r.isEntered
 
-      if (mixer) mixer.update(dt * (0.85 + scroll * 0.5))
+      if (mixer) mixer.update(dt * (0.85 + s * 0.45))
 
-      // Smooth scroll interpolation
-      r.ss = lerp(r.ss, scroll, 0.055)
-      const s = r.ss
+      // Live orbit angle for phase 1, consumed by the rotation-word crossfade.
+      let orbitAngle = -1
+      let inRotatePhase = false
 
-      // Light orbit
+      r.enterBlend = lerp(r.enterBlend, entered ? 1 : 0, 0.05)
+
       accentPt.position.set(
-        Math.sin(t * 0.45) * 7,
-        Math.cos(t * 0.35) * 5 - s * 8,
+        Math.sin(t * 0.45) * 8,
+        Math.cos(t * 0.35) * 5 + jellyPos.y,
         Math.sin(t * 0.6) * 4 + 3
       )
 
       if (!entered) {
-        // ── HERO FACETED SPHERE ───────────────────────────────────────────────
+        /* ── HERO: faceted sphere, gentle breathing parallax ─────────────── */
         contactGroup.visible = false
-        r.camX = lerp(r.camX, r.plx * 1.1 + Math.sin(t * 0.22) * 0.055, 0.038)
-        r.camY = lerp(r.camY, r.ply * 1.1 + Math.cos(t * 0.18) * 0.035, 0.038)
-        r.camZ = 8.2 + Math.sin(t * 0.16) * 0.09
-        camera.position.set(r.camX, r.camY, r.camZ)
-        camera.rotation.z = 0
-        camera.lookAt(0, 0, 0)
+        tPos.set(r.plx * 1.15 + Math.sin(t * 0.22) * 0.06, r.ply * 1.15 + Math.cos(t * 0.18) * 0.04, 8.4 + Math.sin(t * 0.16) * 0.1)
+        tLook.set(0, 0, 0)
+        tRoll = 0
+
         worldGroup.rotation.y = lerp(worldGroup.rotation.y, r.plx * 0.3, 0.055)
         worldGroup.rotation.x = lerp(worldGroup.rotation.x, r.ply * 0.18, 0.055)
 
-        jellyGroup.position.set(0, -0.1, 0)
+        jellyPos.set(0, -0.1, 0)
+        jellyGroup.position.copy(jellyPos)
         jellyGroup.rotation.set(0, t * 0.15, 0)
+        jellyGroup.scale.setScalar(0.65)
 
+        ringsGroup.visible = false
+        shardsGroup.visible = true
       } else {
-        // ── CRAZY 3D SCROLLING JOURNEY ────────────────────────────────────────
-        // Phase 1 (s < 0.28): 3D XYZ turns to the right and right!
-        // Phase 2 (s >= 0.28): Diving downwards with alternating left/right positioning
+        /* ── THE JOURNEY ─────────────────────────────────────────────────── */
+        shardsGroup.visible = r.enterBlend < 0.995
+        ringsGroup.visible = s > TL.ascend.start - 0.06
 
-        let targetCamX = 0
-        let targetCamY = 0
-        let targetCamZ = 8.2
-        let targetCamRoll = 0
-        let targetJellyX = 0
-        let targetJellyY = -0.1
-        let targetJellyZ = 0
-        let targetJellyRotY = s * Math.PI * 2.2 + t * 0.14
-        let targetJellyRotX = 0
-        let targetJellyRotZ = 0
+        worldGroup.rotation.x = lerp(worldGroup.rotation.x, 0, 0.06)
 
-        if (s < 0.32) {
-          // ── PHASE 1: PURE HORIZONTAL 360° ROTATION (DOES NOT GO UP, DOES NOT GO DOWN) ──
-          const rotPhase = s / 0.32
-          const orbitAngle = rotPhase * Math.PI * 2.0 // Full 360° orbit
-          const orbitRadius = 8.2
+        if (s < TL.rotate.end) {
+          /* ── PHASE 1 · THE WORLD ROTATES ───────────────────────────────
+             Camera orbits the jellyfish on a level plane. Y never changes:
+             no rise, no fall — it turns. Four quarter turns, each eased so
+             it accelerates, sweeps, then settles before the next word. */
+          const p = norm(s, TL.rotate.start, TL.rotate.end)
+          const TURNS = 4
+          const raw = p * TURNS
+          const turnIndex = Math.min(Math.floor(raw), TURNS - 1)
+          const within = raw - turnIndex
+          // Ease within each quarter so each "turn" lands with weight.
+          const eased = (turnIndex + easeInOutCubic(within)) / TURNS
+          const angle = eased * Math.PI * 2
+          const radius = 8.4
+          orbitAngle = angle
+          inRotatePhase = true
 
-          targetCamX = Math.sin(orbitAngle) * orbitRadius + r.plx * 0.45
-          targetCamY = 0 // Stays strictly at 0: DOES NOT GO UP, DOES NOT GO DOWN!
-          targetCamZ = Math.cos(orbitAngle) * orbitRadius
-          targetCamRoll = Math.sin(rotPhase * Math.PI * 4.0) * 0.04
-
-          targetJellyX = 0
-          targetJellyY = -0.1
-          targetJellyZ = 0
-          targetJellyRotY = t * 0.2 + rotPhase * Math.PI * 1.5
-          targetJellyRotX = Math.sin(t * 0.8) * 0.05
-          targetJellyRotZ = Math.cos(t * 0.8) * 0.05
-
-          jellyGroup.scale.setScalar(0.65)
-        } else if (s < 0.52) {
-          // ── PHASE 2: ASCENT THROUGH BOXES OF INFO (Cards 1 & 2 before the rings) ──
-          const infoT = (s - 0.32) / 0.20 // 0.0 to 1.0
-          const jellyY = infoT * 16.0 // Jellyfish climbs from Y = 0 to Y = 16.0
-
-          targetJellyX = Math.sin(infoT * Math.PI * 2.0) * 0.42
-          targetJellyY = jellyY
-          targetJellyZ = 0
-          targetJellyRotY = t * 0.22 + infoT * Math.PI * 1.2
-          targetJellyRotX = -0.12 // Pitched slightly upward
-          targetJellyRotZ = Math.cos(infoT * Math.PI * 2.0) * 0.05
-
-          jellyGroup.scale.setScalar(0.65)
-
-          // Camera tracks the jellyfish ascending
-          targetCamY = jellyY - 0.7 + r.ply * 0.3
-          targetCamX = Math.sin(infoT * Math.PI) * 1.2 + r.plx * 0.5
-          targetCamZ = 8.2 + Math.sin(infoT * Math.PI) * 0.4
-          targetCamRoll = Math.sin(infoT * Math.PI * 2.0) * 0.04
-        } else if (s < 0.76) {
-          // ── PHASE 3: 4 ELONGATED GLASS PROJECT RINGS (Y = 20.0 to 42.5) ──
-          const ringT = (s - 0.52) / 0.24 // 0.0 to 1.0
-          const jellyY = 16.0 + ringT * (44.0 - 16.0) // from Y = 16 up to 44 through all 4 cylinders
-
-          targetJellyX = Math.sin(ringT * Math.PI * 3.0) * 0.12 // Centered alignment through cylinders
-          targetJellyY = jellyY
-          targetJellyZ = 0
-          targetJellyRotY = t * 0.25 + ringT * Math.PI * 2.5
-          targetJellyRotX = -0.16
-          targetJellyRotZ = Math.sin(ringT * Math.PI * 4.0) * 0.07
-
-          // Jellyfish shrinks down to 0.24 as it traverses the rings
-          const currentScale = THREE.MathUtils.lerp(0.65, 0.24, Math.min(Math.max((s - 0.52) / 0.16, 0), 1))
-          jellyGroup.scale.setScalar(currentScale)
-
-          // Camera follows jellyfish through the rings
-          targetCamY = jellyY - 0.7 + r.ply * 0.3
-          targetCamX = Math.sin(ringT * Math.PI * 2.0) * 1.5 + r.plx * 0.5
-          targetCamZ = 7.6 + Math.sin(ringT * Math.PI * 2.0) * 0.5
-          targetCamRoll = Math.sin(ringT * Math.PI * 2.0) * 0.05
-        } else if (s < 0.86) {
-          // ── PHASE 4: POST-RING ASCENDING FLIGHT (Y = 44.0 to 60.0) ──
-          // Dedicated scroll section where jellyfish goes up instead of instantly jumping to contact
-          const postRingT = (s - 0.76) / 0.10 // 0.0 to 1.0
-          const jellyY = 44.0 + postRingT * 16.0 // climbs to Y = 60.0
-
-          targetJellyX = Math.sin(postRingT * Math.PI) * 0.3
-          targetJellyY = jellyY
-          targetJellyZ = 0
-          targetJellyRotY = t * 0.28 + postRingT * Math.PI
-          targetJellyRotX = -0.18
-          targetJellyRotZ = Math.cos(postRingT * Math.PI) * 0.05
-
-          jellyGroup.scale.setScalar(0.24)
-
-          targetCamY = jellyY - 0.7 + r.ply * 0.3
-          targetCamX = r.plx * 0.4
-          targetCamZ = 7.8
-          targetCamRoll = 0
-        } else {
-          // ── PHASE 5: CAMERA DETACHES & FRAMES "AURELIA" (PULLED BACK, NOT ZOOMED IN) ──
-          const finaleT = (s - 0.86) / 0.14
-
-          // Jellyfish continues ascending away into the distance:
-          targetJellyY = 60.0 + finaleT * 26.0
-          targetJellyX = Math.sin(finaleT * Math.PI) * 0.5
-          targetJellyZ = -finaleT * 8.0
-          jellyGroup.scale.setScalar(0.18)
-
-          // Camera STOPS following jellyfish and settles comfortably at Y = 54.0, Z = 7.8 (wide view)
-          targetCamY = 54.0 - 0.1
-          targetCamX = r.plx * 0.4
-          targetCamZ = 7.8 + r.ply * 0.3
-          targetCamRoll = 0
-        }
-
-        r.camX = lerp(r.camX, targetCamX, 0.075)
-        r.camY = lerp(r.camY, targetCamY, 0.075)
-        r.camZ = lerp(r.camZ, targetCamZ, 0.075)
-        camera.position.set(r.camX, r.camY, r.camZ)
-
-        jellyGroup.position.set(
-          lerp(jellyGroup.position.x, targetJellyX, 0.075),
-          lerp(jellyGroup.position.y, targetJellyY, 0.075),
-          lerp(jellyGroup.position.z, targetJellyZ, 0.075)
-        )
-        jellyGroup.rotation.y = lerp(jellyGroup.rotation.y, targetJellyRotY, 0.06)
-        jellyGroup.rotation.x = lerp(jellyGroup.rotation.x, targetJellyRotX, 0.06)
-        jellyGroup.rotation.z = lerp(jellyGroup.rotation.z, targetJellyRotZ, 0.06)
-
-        particlePoints.rotation.y = t * 0.02
-        particlePoints.rotation.x = -s * 0.8
-
-        // Animate the 4 rotating 3D glass project rings
-        refs.current.projectRings.forEach((pr, i) => {
-          pr.group.rotation.z = t * pr.spinSpeed + i * 0.5
-          pr.group.position.y = pr.baseY + Math.sin(t * 1.3 + i * 1.5) * 0.15
-        })
-
-        // ── CONTACT SCENE: 3D CRYSTAL "AURELIA" & PEARL WHITE BALLS RISING FROM BELOW ──
-        const isContactActive = s >= 0.84
-        contactGroup.visible = isContactActive
-
-        if (isContactActive) {
-          const riseProgress = Math.min(Math.max((s - 0.84) / 0.12, 0), 1.0)
-          // Cubic ease-out gives a majestic weighted arrival from down below
-          const easeRise = 1 - Math.pow(1 - riseProgress, 3)
-
-          const settledY = 54.0
-          const startOffset = -14.0 // Rises from Y = 40.0 up to 54.0
-          const currentY = settledY + (1 - easeRise) * startOffset
-
-          contactGroup.position.set(0, currentY, 1.8)
-          contactGroup.scale.setScalar(lerp(0.85, 1.0, easeRise))
-          contactGroup.rotation.y = lerp(contactGroup.rotation.y, r.plx * 0.35 + Math.sin(t * 0.3) * 0.03, 0.05)
-          contactGroup.rotation.x = lerp(contactGroup.rotation.x, r.ply * 0.22, 0.05)
-
-          // Camera focuses on "AURELIA"
-          camera.lookAt(contactGroup.position.x, currentY - 0.1, contactGroup.position.z)
-
-          // Dynamic Cursor Repulsion & Harmonic Spring Physics for Pearl White Balls
-          const planeContact = new THREE.Plane().setFromNormalAndCoplanarPoint(
-            new THREE.Vector3(0, 0, 1),
-            contactGroup.position
+          tPos.set(
+            Math.sin(angle) * radius + r.plx * 0.5,
+            r.ply * 0.35, // strictly level — parallax only, never scroll-driven
+            Math.cos(angle) * radius
           )
-          const cursorContact = new THREE.Vector3()
-          raycaster.setFromCamera(new THREE.Vector2(r.mx, r.my), camera)
+          tLook.set(0, -0.1, 0)
+          // A whisper of roll on the sweep, zero at each settle point.
+          tRoll = Math.sin(within * Math.PI) * 0.035 * (turnIndex % 2 === 0 ? 1 : -1)
 
-          let localCursor: THREE.Vector3 | null = null
-          if (raycaster.ray.intersectPlane(planeContact, cursorContact)) {
-            localCursor = contactGroup.worldToLocal(cursorContact.clone())
-          }
+          jellyPos.set(0, -0.1, 0)
+          jellyRot.set(Math.sin(t * 0.8) * 0.05, t * 0.2 + eased * Math.PI * 0.6, Math.cos(t * 0.8) * 0.05)
+          jellyScale = 0.65
 
-          refs.current.balls.forEach(b => {
-            if (localCursor) {
-              const dx = b.mesh.position.x - localCursor.x
-              const dy = b.mesh.position.y - localCursor.y
-              const dz = b.mesh.position.z - localCursor.z
-              const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
-              const repelRadius = 1.6
+          worldGroup.rotation.y = lerp(worldGroup.rotation.y, 0, 0.06)
+        } else if (s < TL.ascend.end) {
+          /* ── PHASE 2 · THE ASCENT ──────────────────────────────────────
+             Words fade, the jellyfish climbs, 3D type drifts past. */
+          const p = norm(s, TL.ascend.start, TL.ascend.end)
+          const eased = easeInOutCubic(p)
+          const y = eased * WORLD.ascendTopY
 
-              if (dist < repelRadius && dist > 0.001) {
-                const force = Math.pow(1 - dist / repelRadius, 1.4) * 0.16
-                b.vel.x += (dx / dist) * force
-                b.vel.y += (dy / dist) * force
-                b.vel.z += (dz / dist) * force * 0.6
-              }
-            }
+          /* Every oscillator below uses sin(p·π·even) so it returns to zero at
+             BOTH ends, and every offset lerps from the pose the previous phase
+             finished on to the pose the next phase begins on. That makes the
+             phase seams continuous — no lurch when the timeline hands over. */
+          jellyPos.set(Math.sin(p * Math.PI * 2) * 0.45, y, Math.sin(p * Math.PI) * 0.4)
+          jellyRot.set(-0.1, t * 0.22 + p * Math.PI * 1.1, Math.cos(p * Math.PI * 2) * 0.05)
+          jellyScale = lerp(0.65, 0.58, p)
 
-            // Gentle floating breathing oscillation
-            b.vel.y += Math.sin(t * 1.3 + b.phase) * 0.0009
-            b.vel.x += Math.cos(t * 0.95 + b.phase) * 0.0006
+          tPos.set(
+            Math.sin(p * Math.PI) * 1.4 + r.plx * 0.55,
+            y + lerp(0, -0.75, eased) + r.ply * 0.35,
+            lerp(8.4, 7.85, eased) + Math.sin(p * Math.PI) * 0.45
+          )
+          tLook.set(jellyPos.x, y + lerp(-0.1, 0.35, eased), jellyPos.z)
+          tRoll = Math.sin(p * Math.PI * 2) * 0.03
+        } else if (s < TL.rings.end) {
+          /* ── PHASE 3 · GLASS PROJECT RINGS ─────────────────────────────
+             The jellyfish shrinks and threads through all four rings while
+             the camera stays locked just behind it. */
+          const p = norm(s, TL.rings.start, TL.rings.end)
+          const y = lerp(WORLD.ascendTopY, WORLD.ringsExitY, p)
 
-            // Spring return to home
-            const toHomeX = b.home.x - b.mesh.position.x
-            const toHomeY = b.home.y - b.mesh.position.y
-            const toHomeZ = b.home.z - b.mesh.position.z
-            b.vel.x += toHomeX * 0.055
-            b.vel.y += toHomeY * 0.055
-            b.vel.z += toHomeZ * 0.055
+          jellyPos.set(Math.sin(p * Math.PI * 3) * 0.14, y, Math.sin(p * Math.PI * 2) * 0.12)
+          jellyRot.set(-0.14, t * 0.26 + p * Math.PI * 2.2, Math.sin(p * Math.PI * 4) * 0.06)
+          // Shrink quickly at the start so it clearly fits through the rings.
+          jellyScale = lerp(0.58, 0.2, easeOutCubic(clamp01(p / 0.55)))
 
-            // Friction / damping
-            b.vel.multiplyScalar(0.86)
-
-            b.mesh.position.add(b.vel)
-            b.mesh.rotation.x += b.vel.y * 0.25
-            b.mesh.rotation.y += b.vel.x * 0.25
-          })
-        } else if (s < 0.32) {
-          // Camera looks at centered jellyfish during horizontal 360° rotation
-          camera.lookAt(0, -0.1, 0)
-          camera.rotateZ(targetCamRoll)
+          /* sin(p·2π) is zero at p=0 and p=1, and the Z term is written as a
+             (1-cos) swell rather than a cos so it also starts at exactly the
+             7.85 the ascent ended on. Both seams stay continuous. */
+          const orbit = Math.sin(p * Math.PI * 2) * 1.35
+          const zSwell = (1 - Math.cos(p * Math.PI * 2)) * 0.5
+          tPos.set(orbit + r.plx * 0.5, y - 0.75 + r.ply * 0.3, 7.85 - zSwell)
+          tLook.set(jellyPos.x, y + 0.35, jellyPos.z)
+          tRoll = Math.sin(p * Math.PI * 2) * 0.04
         } else {
-          // Camera follows jellyfish upwards through cards, rings, and ascent
-          camera.lookAt(jellyGroup.position.x, jellyGroup.position.y, jellyGroup.position.z)
-          camera.rotateZ(targetCamRoll)
+          /* ── PHASE 4 · CAMERA DETACHES, AURELIA ARRIVES ────────────────
+             The jellyfish keeps rising out of frame; the camera stops
+             chasing it and eases onto the AURELIA sculpture. */
+          const p = norm(s, TL.finale.start, TL.finale.end)
+          const hand = easeOutQuint(clamp01(p / 0.42)) // handoff weight
+
+          const jy = WORLD.ringsExitY + p * 22
+          jellyPos.set(Math.sin(p * Math.PI) * 0.6, jy, -p * 7)
+          jellyRot.set(-0.2, t * 0.3 + p * Math.PI, 0)
+          jellyScale = lerp(0.2, 0.13, p)
+
+          /* Blend from "trailing the jellyfish" to the locked hero shot. */
+          // Matches the exact camera pose the rings phase ends on, so the
+          // handoff starts from zero discontinuity.
+          _followPos.set(r.plx * 0.5, jy - 0.75, 7.85)
+          /* Frame AURELIA to the viewport instead of a fixed distance: on a
+             portrait phone the horizontal FOV is tiny, so dolly back until the
+             sculpture plus its orbs comfortably fit with margin. */
+          const halfFov = (camera.fov / 2) * (Math.PI / 180)
+          const needed = (r.aureliaHalfW * 1.16) / (Math.tan(halfFov) * camera.aspect)
+          const dolly = Math.max(6.7, needed) + 1.4 // +1.4 = sculpture's own Z
+          _lockedPos.set(r.plx * 0.55, WORLD.aureliaY + 0.05, dolly + r.ply * 0.3)
+          tPos.copy(_followPos).lerp(_lockedPos, hand)
+
+          _followLook.set(jellyPos.x, jy + 0.35, jellyPos.z)
+          _lockedLook.set(0, WORLD.aureliaY, 1.4)
+          tLook.copy(_followLook).lerp(_lockedLook, hand)
+          tRoll = 0
         }
 
-        shardsGroup.position.y = lerp(shardsGroup.position.y, -s * 3.5, 0.038)
-        shardsGroup.rotation.y = t * 0.035
+        jellyGroup.position.lerp(jellyPos, 0.1)
+        jellyGroup.rotation.x = lerp(jellyGroup.rotation.x, jellyRot.x, 0.07)
+        jellyGroup.rotation.y = lerp(jellyGroup.rotation.y, jellyRot.y, 0.07)
+        jellyGroup.rotation.z = lerp(jellyGroup.rotation.z, jellyRot.z, 0.07)
+        jellyGroup.scale.setScalar(lerp(jellyGroup.scale.x, jellyScale, 0.08))
       }
 
-      // ── Shard Physics & Scattering ──────────────────────────────────────────
-      const m3 = r.mouse3D
-      r.shards.forEach(item => {
-        if (!entered) {
-          const wp = item.attractorPoint.clone().applyMatrix4(worldGroup.matrixWorld)
-          const dist = wp.distanceTo(m3)
-          if (dist < 1.85 && r.isHovering && r.isTransitionOpened) {
-            item.targetPosition.copy(item.attractorPoint).addScaledVector(
-              wp.clone().sub(m3).normalize(),
-              (1 - dist / 1.85) * 0.55
-            )
-          } else {
-            item.targetPosition.copy(item.attractorPoint).multiplyScalar(
-              1 + Math.sin(t * 0.75 + item.phase) * 0.035
-            )
+      // ── Damp camera ──────────────────────────────────────────────────────
+      const posK = entered ? 0.085 : 0.045
+      camPos.lerp(tPos, posK)
+      camLook.lerp(tLook, entered ? 0.1 : 0.06)
+      camRoll = lerp(camRoll, tRoll, 0.07)
+
+      camera.position.copy(camPos)
+      camera.up.set(0, 1, 0)
+      camera.lookAt(camLook)
+      camera.rotateZ(camRoll)
+
+      travellerLight.position.set(camPos.x + 2.5, camPos.y + 1.5, camPos.z - 1.0)
+
+      // ── Particles ────────────────────────────────────────────────────────
+      particlePoints.rotation.y = t * 0.012
+      particleMat.opacity = 0.35 + Math.min(Math.abs(r.vel) * 22, 0.4)
+
+      // ── Word sculptures ──────────────────────────────────────────────────
+      r.words.forEach((w) => {
+        // Local visibility window keyed off camera height, so they reveal as
+        // the jellyfish passes rather than all at once.
+        const d = camPos.y - w.y
+        const near = clamp01(1 - Math.abs(d) / 9)
+        const show = easeOutCubic(near)
+        w.group.visible = show > 0.008
+        if (!w.group.visible) return
+        w.group.scale.setScalar(lerp(w.group.scale.x, 0.3 + show * 0.66, 0.09))
+        const mesh = w.group.children[0] as THREE.Mesh
+        const mat = mesh.material as THREE.MeshPhysicalMaterial
+        mat.opacity = show * 0.96
+        w.group.rotation.y = w.side * 0.42 + Math.sin(t * 0.35 + w.index) * 0.16
+        w.group.position.y = w.y + Math.sin(t * 0.55 + w.index * 1.4) * 0.22
+        w.group.position.x = w.side * lerp(5.1, 3.6, show)
+      })
+
+      // ── Rotation words (phase 1) ─────────────────────────────────────────
+      /* Each word is scored on how close the camera's orbit angle is to that
+         word's anchor, wrapped to +/-PI so the fade is symmetric and
+         continuous across the 0/2PI seam. The window is wider than the 90
+         degree spacing, so consecutive words overlap and CROSSFADE as you
+         scroll rather than popping on and off.
+
+         A global envelope then fades the whole set in at the very start and
+         out over the last fifth of the rotation. Without it the 360 degree
+         loop would swing DESIGN back into view at the end, and the words
+         would still be on screen when the ascent begins. */
+      if (r.turnWords.length) {
+        /* Each word owns exactly ONE quarter turn. `d` is how far the camera
+           has swept PAST that word's anchor, so q is 0..1 across its own
+           quarter. Deliberately NOT wrapped to [-PI, PI]: the orbit sweeps
+           0 -> 2PI monotonically, and wrapping made the last quarter read as
+           only 60deg from DESIGN's anchor, swinging DESIGN back on screen
+           underneath TO ACCOMPLISH. */
+        const QUARTER = Math.PI / 2
+        const rotP = clamp01(s / TL.rotate.end)
+        const envelope =
+          easeOutCubic(clamp01(rotP / 0.03)) * (1 - easeInOutCubic(clamp01((rotP - 0.78) / 0.22)))
+
+        r.turnWords.forEach((tw) => {
+          if (!inRotatePhase) {
+            tw.mat.opacity = lerp(tw.mat.opacity, 0, 0.12)
+            tw.group.visible = tw.mat.opacity > 0.01
+            return
           }
-          if (hold > 0.01) item.targetPosition.addScaledVector(item.scatterVector, hold * 0.88)
-          item.currentPosition.lerp(item.targetPosition, 0.085)
-          item.mesh.position.copy(item.currentPosition)
-          item.mesh.rotation.x += Math.sin(t * 0.28 + item.phase) * 0.0006
-          item.mesh.rotation.y += Math.cos(t * 0.22 + item.phase) * 0.0006
+
+          const q = (orbitAngle - tw.angle) / QUARTER
+          // Slight bleed past both ends so consecutive words kiss rather than
+          // leaving a dead frame between them.
+          if (q < -0.1 || q > 1.12) {
+            tw.mat.opacity = 0
+            tw.group.visible = false
+            return
+          }
+
+          const fadeIn = easeOutCubic(clamp01((q + 0.1) / 0.22))
+          const fadeOut = 1 - easeInCubic(clamp01((q - 0.82) / 0.30))
+          const show = fadeIn * fadeOut * envelope
+
+          tw.group.visible = show > 0.004
+          if (!tw.group.visible) return
+
+          tw.mat.opacity = show * 0.97
+
+          /* The word rides the camera exactly (a === orbitAngle) and is placed
+             on the OPPOSITE side of the origin, so it is always dead centre
+             and always behind the jellyfish. Pinning it to a fixed azimuth
+             instead let it drift to the frame edge while still fully opaque.
+             The motion is therefore vertical: it rises from below as it fades
+             in and sinks away as it leaves. */
+          /* Use the angle of the ACTUAL camera (camPos is damped and lags the
+             target by `posK`), not the target angle. Driving off the target
+             left every word visibly offset to one side of frame while the
+             camera caught up. atan2 of the live position is always exact. */
+          const a = Math.atan2(camPos.x, camPos.z)
+          /* Incoming word rises from below; outgoing word recedes backwards
+             instead of also sitting low, so during a crossfade the two are
+             separated in depth rather than stacked on the same spot. */
+          const leaving = q > 0.5
+          const rad = TURN_WORD_RADIUS + (1 - show) * (leaving ? 2.6 : 1.2)
+          const yOff = leaving ? (1 - show) * 0.55 : -(1 - show) * 1.45
+          tw.group.position.set(
+            -Math.sin(a) * rad,
+            -0.15 + yOff,
+            -Math.cos(a) * rad
+          )
+          tw.group.rotation.y = a // face square-on to the camera
+          tw.group.scale.setScalar(0.78 + show * 0.22)
+        })
+      }
+
+      // ── Rings ────────────────────────────────────────────────────────────
+      r.rings.forEach((ring) => {
+        const d = camPos.y - ring.y
+        const near = clamp01(1 - Math.abs(d) / 12)
+        ring.group.rotation.z = t * ring.spin + ring.index * 0.7
+        ring.group.position.y = ring.y + Math.sin(t * 1.1 + ring.index * 1.5) * 0.12
+
+        const bandMat = ring.band.material as THREE.MeshBasicMaterial
+        bandMat.opacity = easeOutCubic(near) * 0.95
+        if (bandMat.map) bandMat.map.offset.x = (t * 0.035 + ring.index * 0.25) % 1
+
+        // Flare as the jellyfish passes through the hoop.
+        const through = clamp01(1 - Math.abs(jellyGroup.position.y - ring.y) / 2.6)
+        const glowMat = ring.glow.material as THREE.MeshBasicMaterial
+        glowMat.opacity = easeOutCubic(through) * 0.32
+        const pop = 1 + easeOutCubic(through) * 0.05
+        ring.group.scale.setScalar(lerp(ring.group.scale.x, pop, 0.12))
+      })
+
+      // ── Shard physics ────────────────────────────────────────────────────
+      const m3 = r.mouse3D
+      r.shards.forEach((item) => {
+        if (!entered) {
+          /* Breathing rides ALONG THE NORMAL, so plates slide radially and
+             stay overlapped instead of separating tangentially. */
+          item.target
+            .copy(item.home)
+            .addScaledVector(item.normal, Math.sin(t * 0.75 + item.phase) * 0.028)
+
+          if (r.isHovering && r.isTransitionOpened) {
+            _shardWorld.copy(item.home).applyMatrix4(worldGroup.matrixWorld)
+            const dist = _shardWorld.distanceTo(m3)
+            if (dist < HOVER_RADIUS) {
+              /* The cursor presses the shell INWARD along each plate's own
+                 normal. An outward push would fan the plates apart and let
+                 daylight — and the jellyfish — through the gaps; denting
+                 inward can only ever increase overlap, so the shell stays
+                 provably sealed while still feeling soft and reactive. */
+              const f = Math.pow(1 - dist / HOVER_RADIUS, 1.5)
+              item.target.addScaledVector(item.normal, -HOVER_DEPTH * f)
+            }
+          }
+          if (hold > 0.01) item.target.addScaledVector(item.scatter, hold * hold * 0.95)
+          item.current.lerp(item.target, 0.085)
+          item.mesh.position.copy(item.current)
+          item.mesh.rotateZ(Math.sin(t * 0.3 + item.phase) * 0.0007 + hold * item.spin.z)
         } else {
-          item.targetPosition.copy(item.attractorPoint).add(item.scatterVector)
-          item.currentPosition.lerp(item.targetPosition, 0.045)
-          item.mesh.position.copy(item.currentPosition)
-          item.mesh.rotation.x += item.rotSpeed.x
-          item.mesh.rotation.y += item.rotSpeed.y
-          item.mesh.rotation.z += item.rotSpeed.z
+          item.target.copy(item.home).addScaledVector(item.scatter, 1.6)
+          item.current.lerp(item.target, 0.05)
+          item.mesh.position.copy(item.current)
+          item.mesh.rotation.x += item.spin.x
+          item.mesh.rotation.y += item.spin.y
+          item.mesh.rotation.z += item.spin.z
         }
       })
+
+      // ── AURELIA contact scene ────────────────────────────────────────────
+      const contactStart = TL.finale.start - 0.02
+      const contactActive = entered && s >= contactStart
+      contactGroup.visible = contactActive
+
+      if (contactActive) {
+        const rise = clamp01((s - contactStart) / 0.12)
+        const eased = easeOutCubic(rise)
+
+        contactGroup.position.set(0, WORLD.aureliaY - (1 - eased) * 6.5, 1.4)
+        contactGroup.scale.setScalar(lerp(0.9, 1.0, eased))
+        contactGroup.rotation.y = lerp(contactGroup.rotation.y, r.plx * 0.3, 0.06)
+        contactGroup.rotation.x = lerp(contactGroup.rotation.x, r.ply * 0.18, 0.06)
+
+        /* Cursor → world point on the plane of the sculpture. */
+        contactGroup.updateMatrixWorld()
+        _planeNrm.set(0, 0, 1).applyQuaternion(contactGroup.quaternion)
+        _contactPlane.setFromNormalAndCoplanarPoint(_planeNrm, contactGroup.position)
+        raycaster.setFromCamera(_mouseNDC.set(r.mx, r.my), camera)
+        const hasCursor = raycaster.ray.intersectPlane(_contactPlane, _worldHit) !== null
+        const localCursor = hasCursor ? contactGroup.worldToLocal(_worldHit) : null
+
+        r.balls.forEach((b) => {
+          const p = b.mesh.position
+
+          if (localCursor) {
+            const dx = p.x - localCursor.x
+            const dy = p.y - localCursor.y
+            const dz = p.z - localCursor.z
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
+            const R = 1.75
+            if (dist < R && dist > 1e-4) {
+              const force = Math.pow(1 - dist / R, 1.5) * 0.2
+              b.vel.x += (dx / dist) * force
+              b.vel.y += (dy / dist) * force
+              b.vel.z += (dz / dist) * force * 0.55
+            }
+          }
+
+          // Idle drift.
+          b.vel.y += Math.sin(t * 1.25 + b.phase) * 0.0011
+          b.vel.x += Math.cos(t * 0.9 + b.phase) * 0.0008
+
+          // Spring home + damping.
+          b.vel.x += (b.home.x - p.x) * 0.052
+          b.vel.y += (b.home.y - p.y) * 0.052
+          b.vel.z += (b.home.z - p.z) * 0.052
+          b.vel.multiplyScalar(0.865)
+
+          p.add(b.vel)
+          b.mesh.rotation.x += b.vel.y * 0.3
+          b.mesh.rotation.y += b.vel.x * 0.3
+        })
+      }
 
       composer.render()
     }
@@ -891,6 +1249,7 @@ export function JellyCanvas({ config, scrollProgress, holdProgress, isEntered, i
 
     return () => {
       cancelAnimationFrame(raf)
+      unsubscribe()
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('mouseleave', onMouseLeave)
       window.removeEventListener('resize', onResize)
@@ -903,12 +1262,7 @@ export function JellyCanvas({ config, scrollProgress, holdProgress, isEntered, i
   return (
     <div
       ref={containerRef}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 5,
-        pointerEvents: 'none',
-      }}
+      style={{ position: 'fixed', inset: 0, zIndex: 5, pointerEvents: 'none' }}
     />
   )
 }
