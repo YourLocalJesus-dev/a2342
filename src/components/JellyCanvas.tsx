@@ -42,6 +42,10 @@ interface Shard {
   /* Chosen plates survive the burst as a drifting debris field. `field` is
      their anchor, with y stored RELATIVE to the camera so the field rides
      along as the camera climbs the world. */
+  /* The exact orientation the plate was built with. Every per-frame rotation
+     is applied as an offset FROM this, never accumulated onto the mesh, so
+     the shell always returns to a perfectly symmetric rest state. */
+  baseQuat: THREE.Quaternion
   ambient: boolean
   field: THREE.Vector3
   /* Where the burst left the plate, captured once on the first ambient frame.
@@ -145,6 +149,27 @@ const SHELL_DESKTOP = { rows: 17, scale: 3.4 }
 const SHELL_MOBILE = { rows: 15, scale: 4.3 }
 // Inscribed half-extents of the segRoman plate at scale 1, used to derive how
 // many plates a latitude band needs in order to stay overlapped.
+/* SECTION PALETTE.
+   One hue per narrative beat. The jellyfish crossfades between these as the
+   scroll moves from one phase to the next, so each section has its own
+   identity without the change ever reading as a hard switch. Anchors are the
+   MIDPOINT of each phase, so the colour is settled while you are inside a
+   section and only in motion across the boundary. */
+/* Camera distance the assembly starts from. At 62 the orb covers ~14% of the
+   half-screen (a distant speck); the old 19.5 covered ~43% and barely read as
+   an approach at all. */
+const ASSEMBLE_FAR = 62
+
+const DEFAULT_C1 = '#e392fe'
+const DEFAULT_C2 = '#d357fe'
+
+const JELLY_PALETTE: { at: number; c1: string; c2: string }[] = [
+  { at: 0.0, c1: '#e392fe', c2: '#d357fe' }, // rotate  — the signature violet
+  { at: 0.44, c1: '#6fd0ff', c2: '#3aa0f5' }, // ascend  — cool ascent blue
+  { at: 0.7, c1: '#7af5d0', c2: '#28c9a8' }, // rings   — glass teal
+  { at: 0.93, c1: '#ffc48a', c2: '#ff8f6b' }, // finale  — warm arrival
+]
+
 const PLATE_HW = 0.14605
 const PLATE_HH = 0.16974
 const TURN_WORD_RADIUS = 5.2
@@ -170,6 +195,13 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     turnWords: [] as TurnWord[],
     jellyMatOuter: null as THREE.MeshStandardMaterial | null,
     jellyMatInner: null as THREE.MeshPhysicalMaterial | null,
+    /* Set once the user picks their own colour in the customize widget. From
+       then on their choice wins and the automatic section shift stops, so we
+       never fight the control the user just used. */
+    snapFar: false,
+    userTinted: false,
+    tintC1: new THREE.Color('#e392fe'),
+    tintC2: new THREE.Color('#d357fe'),
     mx: -999,
     my: -999,
     mouse3D: new THREE.Vector3(999, 0, 0),
@@ -189,20 +221,33 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     // from here rather than from page load.
     if (isTransitionOpened && refs.current.assembleStart < 0) {
       refs.current.assembleStart = performance.now()
+      /* Teleport the camera to the far mark rather than letting it damp out
+         to it. The rig eases toward its target, so without this the camera
+         would DRIFT AWAY from the orb while the shards fly in — the opposite
+         of the intended approach. */
+      refs.current.snapFar = true
     }
   }, [isTransitionOpened])
 
   /* Live material sync from the "customize me" widget. */
   useEffect(() => {
     const r = refs.current
+    /* A colour that differs from the default means the user has chosen one in
+       the widget. Their pick then overrides the automatic section shift — the
+       control must always win over the ambient animation. */
+    if (config.color1 !== DEFAULT_C1 || config.color2 !== DEFAULT_C2) {
+      r.userTinted = true
+      r.tintC1.set(config.color1)
+      r.tintC2.set(config.color2)
+    } else {
+      r.userTinted = false
+    }
+
     if (r.jellyMatOuter) {
-      r.jellyMatOuter.color.set(config.color1)
-      r.jellyMatOuter.emissive.set(config.color2)
       r.jellyMatOuter.opacity = config.opacity
       r.jellyMatOuter.needsUpdate = true
     }
     if (r.jellyMatInner) {
-      r.jellyMatInner.color.set(config.color2)
       r.jellyMatInner.reflectivity = config.reflectivity
       r.jellyMatInner.needsUpdate = true
     }
@@ -548,6 +593,7 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
                a hollow centre so nothing ever parks in front of the subject.
                y is relative to the camera and spans a tall band so plates
                enter and leave frame as the journey climbs. */
+            baseQuat: mesh.quaternion.clone(),
             burst: new THREE.Vector3(),
             burstSet: false,
             ease: 0,
@@ -937,6 +983,9 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     const _followLook = new THREE.Vector3()
     const _lockedLook = new THREE.Vector3()
     const _shardWorld = new THREE.Vector3()
+    const _tintC1 = new THREE.Color()
+    const _tintC2 = new THREE.Color()
+    const _tmpColor = new THREE.Color()
     const _planeNrm = new THREE.Vector3()
     const _worldHit = new THREE.Vector3()
     const _mouseNDC = new THREE.Vector2()
@@ -966,6 +1015,46 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
 
       r.enterBlend = lerp(r.enterBlend, entered ? 1 : 0, 0.05)
 
+      /* ── Jellyfish section tint ──────────────────────────────────────────
+         Walk the palette, find the two anchors the scroll currently sits
+         between, and interpolate. easeInOutCubic on the segment fraction
+         means the hue is stationary in the middle of a section and only
+         moves across the boundary, so it never looks like a colour cycle.
+
+         The result is then eased toward per-frame with a small lerp: that
+         second stage is what guarantees smoothness even if the scroll value
+         jumps (a scrollbar drag, an anchor jump, a dropped frame). */
+      if (r.jellyMatOuter || r.jellyMatInner) {
+        if (r.userTinted) {
+          _tintC1.copy(r.tintC1)
+          _tintC2.copy(r.tintC2)
+        } else {
+          let lo = JELLY_PALETTE[0]
+          let hi = JELLY_PALETTE[JELLY_PALETTE.length - 1]
+          for (let i = 0; i < JELLY_PALETTE.length - 1; i++) {
+            if (s >= JELLY_PALETTE[i].at && s <= JELLY_PALETTE[i + 1].at) {
+              lo = JELLY_PALETTE[i]
+              hi = JELLY_PALETTE[i + 1]
+              break
+            }
+          }
+          const span = hi.at - lo.at
+          const f = span > 0 ? easeInOutCubic(clamp01((s - lo.at) / span)) : 0
+          _tintC1.set(lo.c1).lerp(_tmpColor.set(hi.c1), f)
+          _tintC2.set(lo.c2).lerp(_tmpColor.set(hi.c2), f)
+        }
+
+        // Frame-rate independent approach, same half-life idea as the scroll.
+        const ck = 1 - Math.pow(2, -dt / 0.22)
+        if (r.jellyMatOuter) {
+          r.jellyMatOuter.color.lerp(_tintC1, ck)
+          r.jellyMatOuter.emissive.lerp(_tintC2, ck)
+        }
+        if (r.jellyMatInner) {
+          r.jellyMatInner.color.lerp(_tintC2, ck)
+        }
+      }
+
       accentPt.position.set(
         Math.sin(t * 0.45) * 8,
         Math.cos(t * 0.35) * 5 + jellyPos.y,
@@ -988,8 +1077,10 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
             : clamp01((performance.now() - r.assembleStart) / ASSEMBLE_MS)
         const asm = easeOutCubic(r.assemble)
 
-        // Camera pushes from far back to the framing distance as the orb forms.
-        const dolly = lerp(19.5, 8.4, asm)
+        /* Camera pushes from FAR back to the framing distance as the orb forms.
+           19.5 was only ~2.3x the final 8.4, which barely read as a zoom; 62
+           starts the orb as a distant speck so the approach has real scale. */
+        const dolly = lerp(ASSEMBLE_FAR, 8.4, asm)
         tPos.set(
           r.plx * 1.15 * asm + Math.sin(t * 0.22) * 0.06 * asm,
           r.ply * 1.15 * asm + Math.cos(t * 0.18) * 0.04 * asm,
@@ -1130,6 +1221,10 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       }
 
       // ── Damp camera ──────────────────────────────────────────────────────
+      if (r.snapFar) {
+        camPos.set(0, 0, ASSEMBLE_FAR)
+        r.snapFar = false
+      }
       const posK = entered ? 0.085 : 0.045
       camPos.lerp(tPos, posK)
       camLook.lerp(tLook, entered ? 0.1 : 0.06)
@@ -1301,7 +1396,26 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           if (hold > 0.01) item.target.addScaledVector(item.scatter, hold * hold * 0.95)
           item.current.lerp(item.target, 0.085)
           item.mesh.position.copy(item.current)
-          item.mesh.rotateZ(Math.sin(t * 0.3 + item.phase) * 0.0007 + hold * item.spin.z)
+          /* NO accumulated wobble while the shell is intact.
+             This used to be rotateZ(sin(t*0.3 + phase)*0.0007 + hold*spin.z).
+             Because `phase` is a per-plate hash, every plate crept to a
+             DIFFERENT angle over time: the shell is BUILT perfectly symmetric
+             (identical plates, zero tilt, one sphere), but this quietly
+             accumulated a unique rotation on each one, so within seconds the
+             mosaic looked randomly tilted again. That is why the asymmetry
+             kept coming back even after every build-time constant was zeroed.
+
+             Instead: reset to the pristine orientation each frame, then apply
+             a tumble that is a pure FUNCTION of hold. That makes it exactly
+             reversible — at hold 0 the shell is bit-for-bit symmetric, and a
+             partial press-and-release leaves no permanent skew. */
+          item.mesh.quaternion.copy(item.baseQuat)
+          if (hold > 0.001) {
+            const k = hold * hold * 72
+            item.mesh.rotateX(item.spin.x * k)
+            item.mesh.rotateY(item.spin.y * k)
+            item.mesh.rotateZ(item.spin.z * k)
+          }
         } else if (item.ambient) {
           if (!item.burstSet) {
             // Freeze the hand-off point, in camera-local Y.

@@ -16,8 +16,15 @@ let velocity = 0 // d(smooth)/frame, used for motion-reactive flourishes
 let running = false
 let enabled = false
 
-/** Critically-damped-ish follow. Frame-rate normalised so 120Hz ≈ 60Hz. */
-const FOLLOW = 0.085
+/* Exponential smoothing expressed as a HALF-LIFE in seconds rather than a
+   per-frame fraction. The old code lerped by a fixed 0.085 every frame and
+   the comment claimed it was frame-rate normalised, but it never was: the
+   same 26 frames to converge means 181ms at 144Hz and 867ms at 30Hz. Worse,
+   any fps dip mid-scroll silently changed the easing rate, which is what
+   read as jerk. Converting to a half-life and deriving the per-frame factor
+   from real elapsed time makes the FEEL identical at any frame rate and
+   immune to dropped frames. */
+const HALF_LIFE = 0.11 // seconds for the remaining distance to halve
 
 /* The narrative is measured against the .home-page track ONLY, not the whole
    document. The frosted footer lives below that track, so scoping this way
@@ -37,17 +44,29 @@ function measure() {
   raw = max > 0 ? Math.min(Math.max(window.scrollY / max, 0), 1) : 0
 }
 
-function tick() {
+let lastT = 0
+
+function tick(now?: number) {
   if (!running) return
   requestAnimationFrame(tick)
 
+  /* Real elapsed seconds, clamped so a background tab or a long GC pause
+     cannot teleport the scroll position when the page regains focus. */
+  const t = typeof now === 'number' ? now : performance.now()
+  const dt = lastT ? Math.min((t - lastT) / 1000, 0.1) : 1 / 60
+  lastT = t
+
   const prev = smooth
-  smooth += (raw - smooth) * FOLLOW
+  // k = 1 - 2^(-dt/halfLife): the frame-rate independent form of a lerp.
+  const k = 1 - Math.pow(2, -dt / HALF_LIFE)
+  smooth += (raw - smooth) * k
 
   // Snap out the last sliver so we can settle exactly on 0 and 1.
   if (Math.abs(raw - smooth) < 0.00002) smooth = raw
 
-  velocity = smooth - prev
+  /* Velocity is normalised to per-60fps-frame so downstream flourishes keep
+     the same magnitude they were tuned against, regardless of real fps. */
+  velocity = dt > 0 ? (smooth - prev) * (1 / 60 / dt) : 0
   if (smooth !== prev || velocity !== 0) {
     listeners.forEach((fn) => fn(smooth, velocity))
   }
