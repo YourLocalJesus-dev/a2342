@@ -31,6 +31,11 @@ function App() {
   const [loadPercentage, setLoadPercentage] = useState(0)
   const [isPreloaderDone, setIsPreloaderDone] = useState(false)
   const [isTransitionOpened, setIsTransitionOpened] = useState(false)
+  /* True once the shards have swarmed into the orb and the camera has
+     finished its dolly. The click-and-hold UI is gated on THIS, not on
+     isTransitionOpened, so the interface arrives as the orb closes instead
+     of hanging in space over an empty scene while the shards fly in. */
+  const [isAssembled, setIsAssembled] = useState(false)
 
   // Enter Experience / Click & Hold State
   const [isEntered, setIsEntered] = useState(false)
@@ -51,7 +56,15 @@ function App() {
   const lastScrollCueRef = useRef(0)
 
   // Custom Magnetic Cursor
-  const [cursorPos, setCursorPos] = useState({ x: -100, y: -100 })
+  /* The cursor is driven IMPERATIVELY through a ref. It used to be React
+     state written on every mousemove, which re-rendered the entire app —
+     canvas wrapper and all — hundreds of times a second. That is what made
+     the cursor lag, stutter and feel "buggy": it was always a few frames
+     behind the real pointer. Now the transform is written straight to the
+     node inside a rAF, so it tracks perfectly and costs no renders. */
+  const cursorRef = useRef<HTMLDivElement | null>(null)
+  const cursorTargetRef = useRef({ x: -100, y: -100 })
+  const cursorRafRef = useRef<number | null>(null)
   const [cursorText, setCursorText] = useState('')
   const [isCursorDiff, setIsCursorDiff] = useState(false)
   const [isCursorExpanded, setIsCursorExpanded] = useState(false)
@@ -102,6 +115,11 @@ function App() {
   const handleStartExperience = () => {
     sound.playStartChime()
     setIsTransitionOpened(true)
+    // Rising sweep that runs underneath the shard fly-in.
+    sound.playAssembleSweep()
+    /* Must stay in lockstep with ASSEMBLE_MS in JellyCanvas. A shade longer so
+       the UI lands just after the last plate seats, never before. */
+    window.setTimeout(() => setIsAssembled(true), 2750)
   }
 
   // Lock scrolling before holding to enter
@@ -140,7 +158,8 @@ function App() {
   }
 
   useEffect(() => {
-    if (isEntered || !isTransitionOpened) return
+    // Ignore press-and-hold until the orb exists to be held.
+    if (isEntered || !isTransitionOpened || !isAssembled) return
 
     const handleDown = (e: MouseEvent | TouchEvent) => {
       if (isEntered) return
@@ -202,7 +221,7 @@ function App() {
       window.removeEventListener('touchstart', handleDown)
       window.removeEventListener('touchend', handleUp)
     }
-  }, [isEntered, isTransitionOpened])
+  }, [isEntered, isTransitionOpened, isAssembled])
 
   // Hand the scroll track over to the shared eased scroll store once the
   // experience is entered, and ride it for the audio swoosh cues.
@@ -223,8 +242,19 @@ function App() {
 
   // Custom Cursor Mouse Listener with Automatic Hover Detection
   useEffect(() => {
+    // rAF loop: coalesces many mousemoves into one write per frame.
+    const tick = () => {
+      const el = cursorRef.current
+      if (el) {
+        const { x, y } = cursorTargetRef.current
+        el.style.transform = `translate3d(${x}px, ${y}px, 0)`
+      }
+      cursorRafRef.current = requestAnimationFrame(tick)
+    }
+    cursorRafRef.current = requestAnimationFrame(tick)
+
     const handleMouseMove = (e: MouseEvent) => {
-      setCursorPos({ x: e.clientX, y: e.clientY })
+      cursorTargetRef.current = { x: e.clientX, y: e.clientY }
 
       const target = e.target as HTMLElement | null
       if (!target) return
@@ -255,7 +285,10 @@ function App() {
     }
 
     window.addEventListener('mousemove', handleMouseMove, { passive: true })
-    return () => window.removeEventListener('mousemove', handleMouseMove)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      if (cursorRafRef.current) cancelAnimationFrame(cursorRafRef.current)
+    }
   }, [cursorText])
 
   const setCursorHover = (text: string, isDiff: boolean = false) => {
@@ -288,10 +321,8 @@ function App() {
       {/* Custom Cursor */}
       <div
         id="cursor"
+        ref={cursorRef}
         className={`${isCursorDiff ? 'dif' : ''} ${isCursorExpanded ? 'expanded' : ''}`}
-        style={{
-          transform: `translate3d(${cursorPos.x}px, ${cursorPos.y}px, 0)`,
-        }}
       >
         <div className="wrapper">
           <div className="text">
@@ -530,7 +561,7 @@ function App() {
 
 
       {/* Hero Studio Identity & Crazy Animated Accolades */}
-      <div className={`hero-giant-title ${isEntered ? 'is-hidden' : ''} ${isTransitionOpened ? '' : 'is-preload'}`}>
+      <div className={`hero-giant-title ${isEntered ? 'is-hidden' : ''} ${isAssembled ? '' : 'is-preload'}`}>
         <div className="hero-studio-container">
           
           {/* Top Studio Prestige Tag */}
@@ -614,7 +645,8 @@ function App() {
         isEntered={isEntered}
         isTransitionOpened={isTransitionOpened}
         onHoverModel={(isHovering) => {
-          if (!isEntered) {
+          // Only offer the affordance once the orb is actually assembled.
+          if (!isEntered && isAssembled) {
             setIsCursorExpanded(isHovering)
             setCursorText(isHovering ? 'CLICK AND HOLD' : '')
           }
@@ -622,7 +654,7 @@ function App() {
       />
 
       {/* Hero Bottom Bar: ARE YOU READY TO STEP INTO THE FUTURE? + Progress Fill */}
-      <div className={`hero-bottom-bar ${isEntered ? 'is-hidden' : ''} ${isTransitionOpened ? 'is-visible' : ''}`}>
+      <div className={`hero-bottom-bar ${isEntered ? 'is-hidden' : ''} ${isAssembled ? 'is-visible' : ''}`}>
         <div className="bottom-row">
           <span className="tagline">ARE YOU READY TO STEP INTO THE FUTURE?</span>
           <div className="right-hold-group">
@@ -725,7 +757,7 @@ function App() {
       )}
 
       {/* Fixed Bottom UI Controls */}
-      <div className={`social-links-global-parent ${isTransitionOpened ? 'is-visible' : ''}`}>
+      <div className={`social-links-global-parent ${isAssembled ? 'is-visible' : ''}`}>
         <div className="social-links-global">
           {/* Bottom Left Volume Toggle */}
           <div

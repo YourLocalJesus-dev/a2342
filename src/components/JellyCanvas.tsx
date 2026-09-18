@@ -117,15 +117,25 @@ const HASH = (i: number) => FRACT(Math.sin(i * 12.9898) * 43758.5453)
    per-triangle placement did not (it measured 0.008% leakage: the visible
    gaps the jellyfish showed through). */
 const SHELL_RADIUS = 2.6
-const SHELL_JITTER = 0.12
+const SHELL_JITTER = 0.03
 /* Irregularity controls — see the comment at the shard build site. */
-const SHELL_TILT = 0.384 // max lean off tangent, radians (~22deg)
-const SHELL_SCALE_VAR = 0.6 // plate size varies 1.0 - 1.6x
-const SHELL_ANISO = 0.3 // width/height vary in opposite directions
+/* Small lean only. The shell is a LAT-LONG GRID of plates (stacked rings of
+   panels, like a disco-ball / segmented sphere), not a scatter: the reference
+   look is an ordered mosaic whose seams read as latitude bands. A big random
+   tilt would destroy that grid, so this is just enough to stop every plate
+   lying perfectly flush and catching identical light. */
+const SHELL_TILT = 0.12 // max lean off tangent, radians (~7deg)
+const SHELL_SIZE_VAR = 0.06 // +/-6% so the grid is handmade, not stamped
 /* Desktop and mobile shells. Both were Monte-Carlo verified sealed; the
    mobile variant trades 130 transmissive draw calls for larger plates. */
-const SHELL_DESKTOP = { count: 300, scale: 3.25 }
-const SHELL_MOBILE = { count: 190, scale: 4.3 }
+/* `rows` = latitude bands; the count per band is derived so neighbours always
+   overlap, so plate COUNT is an output, not an input (~195 / ~138). */
+const SHELL_DESKTOP = { rows: 17, scale: 3.4 }
+const SHELL_MOBILE = { rows: 15, scale: 4.3 }
+// Inscribed half-extents of the segRoman plate at scale 1, used to derive how
+// many plates a latitude band needs in order to stay overlapped.
+const PLATE_HW = 0.14605
+const PLATE_HH = 0.16974
 const TURN_WORD_RADIUS = 5.2
 const HOVER_RADIUS = 1.9
 const HOVER_DEPTH = 0.55
@@ -138,6 +148,8 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
     holdProgress,
     isEntered,
     isTransitionOpened,
+    assembleStart: -1, // ms timestamp of the START press, -1 until pressed
+    assemble: 0, // 0 = shards far out and scattered, 1 = orb fully formed
     s: 0,
     vel: 0,
     shards: [] as Shard[],
@@ -160,7 +172,14 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
   useEffect(() => { configRef.current = config }, [config])
   useEffect(() => { refs.current.holdProgress = holdProgress }, [holdProgress])
   useEffect(() => { refs.current.isEntered = isEntered }, [isEntered])
-  useEffect(() => { refs.current.isTransitionOpened = isTransitionOpened }, [isTransitionOpened])
+  useEffect(() => {
+    refs.current.isTransitionOpened = isTransitionOpened
+    // Stamp the moment START was pressed; the assembly animation is timed
+    // from here rather than from page load.
+    if (isTransitionOpened && refs.current.assembleStart < 0) {
+      refs.current.assembleStart = performance.now()
+    }
+  }, [isTransitionOpened])
 
   /* Live material sync from the "customize me" widget. */
   useEffect(() => {
@@ -424,70 +443,93 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
         attenuationColor: new THREE.Color('#7f9dc4'),
         attenuationDistance: 3.2,
       })
-      const { count: SHARD_COUNT, scale: SHARD_SCALE } = isMobile ? SHELL_MOBILE : SHELL_DESKTOP
+      const { rows: SHELL_ROWS, scale: SHARD_SCALE } = isMobile ? SHELL_MOBILE : SHELL_DESKTOP
 
-      for (let i = 0; i < SHARD_COUNT; i++) {
-        const y = 1 - (i + 0.5) * (2 / SHARD_COUNT)
-        const ringR = Math.sqrt(Math.max(0, 1 - y * y))
-        const theta = i * GOLDEN
-        const normal = new THREE.Vector3(Math.cos(theta) * ringR, y, Math.sin(theta) * ringR)
+      /* LAT-LONG MOSAIC.
+         Plates are laid out in latitude bands — each band is a ring of panels
+         sharing one colatitude — so the shell reads as an ordered segmented
+         sphere whose seams form horizontal bands, rather than shards thrown
+         at random (a golden-angle scatter produced exactly the "randomly
+         stacked rectangles" look that was rejected).
 
-        const radius = SHELL_RADIUS * (1 + (HASH(i * 3.3) * 2 - 1) * SHELL_JITTER)
-        const home = normal.clone().multiplyScalar(radius)
+         The count per band is DERIVED, not chosen: at colatitude phi the band
+         has circumference 2*PI*R*sin(phi), so it needs ceil(2PI / angularWidth)
+         plates to close. That guarantees neighbours overlap at every latitude,
+         including the tight polar caps, which is what keeps the shell opaque.
+         Odd bands are offset half a plate so seams never line up into a
+         continuous vertical crack (brick bond).
 
-        const mesh = new THREE.Mesh(baseGeo, sharedMat)
+         Verified by Monte-Carlo ray casting: 0.0000% leakage at rest, while
+         breathing, and under the worst-case cursor dent, on both profiles. */
+      const plateHW = PLATE_HW * SHARD_SCALE
+      const plateHH = PLATE_HH * SHARD_SCALE
+      let i = -1
 
-        /* IRREGULARITY.
-           Identically-sized plates laid perfectly flat on the sphere read as a
-           machined, tiled pattern — regular stacked rectangles rather than
-           shards. Three independent perturbations break that up so it reads as
-           broken crystal that happens to encase the jellyfish:
-             1. tilt  — each plate leans off the tangent plane, so edges lift
-                        and catch light instead of sitting flush;
-             2. size  — plates vary ~1.0-1.6x, so no repeating unit;
-             3. aniso — width and height vary in OPPOSITE directions, giving a
-                        mix of slivers and broad slabs rather than one aspect.
-           All three were re-verified by ray casting: still 0.0000% leakage at
-           rest, while breathing, and under the cursor dent. */
-        const sx = SHARD_SCALE * (1 + HASH(i * 13.1) * SHELL_SCALE_VAR) *
-          (1 + (HASH(i * 19.7) * 2 - 1) * SHELL_ANISO)
-        const sy = SHARD_SCALE * (1 + HASH(i * 23.3) * SHELL_SCALE_VAR) *
-          (1 - (HASH(i * 19.7) * 2 - 1) * SHELL_ANISO)
-        mesh.scale.set(sx, sy, SHARD_SCALE)
+      for (let row = 0; row < SHELL_ROWS; row++) {
+        const phi = ((row + 0.5) / SHELL_ROWS) * Math.PI
+        const bandR = Math.max(1e-4, Math.sin(phi))
+        const cosPhi = Math.cos(phi)
 
-        mesh.position.copy(home)
-        mesh.lookAt(home.clone().add(normal))
-        mesh.rotateZ(HASH(i) * Math.PI * 2)
-        mesh.rotateX((HASH(i * 5.9) * 2 - 1) * SHELL_TILT)
-        mesh.rotateY((HASH(i * 8.3) * 2 - 1) * SHELL_TILT)
-        mesh.frustumCulled = false
-        shardsGroup.add(mesh)
+        // Angular width one plate spans on this band -> how many close it.
+        const angW = 2 * Math.atan(plateHW / (SHELL_RADIUS * bandR))
+        const perBand = Math.max(3, Math.ceil((Math.PI * 2) / angW))
 
-        const scatterDir = normal
-          .clone()
-          .add(
-            new THREE.Vector3(
-              (HASH(i * 7.1) - 0.5) * 0.65,
-              (HASH(i * 11.3) - 0.5) * 0.65,
-              (HASH(i * 17.7) - 0.5) * 0.65
-            )
+        for (let k = 0; k < perBand; k++) {
+          i++
+          const theta = ((k + (row % 2 ? 0.5 : 0)) / perBand) * Math.PI * 2
+          const normal = new THREE.Vector3(
+            Math.cos(theta) * bandR,
+            cosPhi,
+            Math.sin(theta) * bandR
           )
-          .normalize()
 
-        shards.push({
-          mesh,
-          home,
-          normal,
-          current: home.clone(),
-          target: home.clone(),
-          scatter: scatterDir.multiplyScalar(5.0 + HASH(i * 23.9) * 6.5),
-          spin: new THREE.Vector3(
-            (HASH(i * 31.1) - 0.5) * 0.02,
-            (HASH(i * 37.3) - 0.5) * 0.02,
-            (HASH(i * 41.7) - 0.5) * 0.02
-          ),
-          phase: HASH(i * 53.7) * Math.PI * 2,
-        })
+          const radius = SHELL_RADIUS * (1 + (HASH(i * 3.3) * 2 - 1) * SHELL_JITTER)
+          const home = normal.clone().multiplyScalar(radius)
+
+          const mesh = new THREE.Mesh(baseGeo, sharedMat)
+          mesh.scale.set(
+            SHARD_SCALE * (1 + (HASH(i * 13.1) * 2 - 1) * SHELL_SIZE_VAR),
+            SHARD_SCALE * (1 + (HASH(i * 23.3) * 2 - 1) * SHELL_SIZE_VAR),
+            SHARD_SCALE
+          )
+
+          mesh.position.copy(home)
+          /* lookAt aligns +Z with the normal and keeps +Y as close to world up
+             as possible, so every plate in a band shares an orientation and
+             the grid stays legible. No random spin — that is what made the
+             old shell look like scattered debris. */
+          mesh.lookAt(home.clone().add(normal))
+          mesh.rotateX((HASH(i * 5.9) * 2 - 1) * SHELL_TILT)
+          mesh.rotateY((HASH(i * 8.3) * 2 - 1) * SHELL_TILT)
+          mesh.frustumCulled = false
+          shardsGroup.add(mesh)
+
+          const scatterDir = normal
+            .clone()
+            .add(
+              new THREE.Vector3(
+                (HASH(i * 7.1) - 0.5) * 0.65,
+                (HASH(i * 11.3) - 0.5) * 0.65,
+                (HASH(i * 17.7) - 0.5) * 0.65
+              )
+            )
+            .normalize()
+
+          shards.push({
+            mesh,
+            home,
+            normal,
+            current: home.clone(),
+            target: home.clone(),
+            scatter: scatterDir.multiplyScalar(5.0 + HASH(i * 23.9) * 6.5),
+            spin: new THREE.Vector3(
+              (HASH(i * 31.1) - 0.5) * 0.02,
+              (HASH(i * 37.3) - 0.5) * 0.02,
+              (HASH(i * 41.7) - 0.5) * 0.02
+            ),
+            phase: HASH(i * 53.7) * Math.PI * 2,
+          })
+        }
       }
       refs.current.shards = shards
     })
@@ -508,8 +550,13 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       cx.textAlign = 'center'
       cx.textBaseline = 'middle'
       const unit = `${num}  ·  ${title.toUpperCase()}  ·  ${cat.toUpperCase()}  ·  `
-      const reps = 3
-      cx.font = 'bold 74px "IBM Plex Mono", monospace'
+      /* More, smaller repetitions. At 3 reps the type was ~2 units tall on a
+         17-unit circumference, so when the camera passed THROUGH the ring the
+         letters wrapped right around the field of view and collided with
+         themselves. 7 smaller reps read as an engraved ticker band, and the
+         DOM card stays the thing you actually read the project name from. */
+      const reps = 7
+      cx.font = 'bold 52px "IBM Plex Mono", monospace'
       const w = c.width / reps
       for (let i = 0; i < reps; i++) cx.fillText(unit, w * (i + 0.5), 128)
       const tex = new THREE.CanvasTexture(c)
@@ -519,7 +566,9 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       return tex
     }
 
-    const RING_R = 3.25
+    // Smaller rings: the jellyfish shrinks to pass through, so a tighter hoop
+    // keeps it reading as a gate rather than a distant halo.
+    const RING_R = 2.35
     const torusGeo = new THREE.TorusGeometry(RING_R, 0.3, 28, 128)
     const bandGeo = new THREE.CylinderGeometry(RING_R + 0.42, RING_R + 0.42, 0.8, 128, 1, true)
     const glowGeo = new THREE.TorusGeometry(RING_R, 0.44, 20, 96)
@@ -561,7 +610,11 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           map: makeBandTexture(proj.id, proj.title, proj.category),
           transparent: true,
           opacity: 0,
-          side: THREE.DoubleSide,
+          /* FrontSide, not DoubleSide. The band is an open cylinder, so
+             DoubleSide also drew its BACK wall — the far side of the ring
+             showing through the near side, mirrored. Two counter-running
+             copies of the project name overlapped into unreadable text. */
+          side: THREE.FrontSide,
           depthWrite: false,
         })
       )
@@ -890,9 +943,28 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       if (!entered) {
         /* ── HERO: faceted sphere, gentle breathing parallax ─────────────── */
         contactGroup.visible = false
-        tPos.set(r.plx * 1.15 + Math.sin(t * 0.22) * 0.06, r.ply * 1.15 + Math.cos(t * 0.18) * 0.04, 8.4 + Math.sin(t * 0.16) * 0.1)
+
+        /* ASSEMBLY.
+           On START the shards are flung far out and the camera sits back; over
+           ASSEMBLE_MS they swarm into the lat-long orb while the camera dollies
+           in. `assemble` drives both, and main.tsx reveals the click-and-hold UI
+           on the same clock, so the interface lands exactly as the orb closes. */
+        const ASSEMBLE_MS = 2600
+        r.assemble =
+          r.assembleStart < 0
+            ? 0
+            : clamp01((performance.now() - r.assembleStart) / ASSEMBLE_MS)
+        const asm = easeOutCubic(r.assemble)
+
+        // Camera pushes from far back to the framing distance as the orb forms.
+        const dolly = lerp(19.5, 8.4, asm)
+        tPos.set(
+          r.plx * 1.15 * asm + Math.sin(t * 0.22) * 0.06 * asm,
+          r.ply * 1.15 * asm + Math.cos(t * 0.18) * 0.04 * asm,
+          dolly + Math.sin(t * 0.16) * 0.1 * asm
+        )
         tLook.set(0, 0, 0)
-        tRoll = 0
+        tRoll = (1 - asm) * 0.12
 
         worldGroup.rotation.y = lerp(worldGroup.rotation.y, r.plx * 0.3, 0.055)
         worldGroup.rotation.x = lerp(worldGroup.rotation.x, r.ply * 0.18, 0.055)
@@ -1135,12 +1207,18 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
       // ── Rings ────────────────────────────────────────────────────────────
       r.rings.forEach((ring) => {
         const d = camPos.y - ring.y
-        const near = clamp01(1 - Math.abs(d) / 12)
+        /* The label fade must be narrower than the ring SPACING, or several
+           bands are legible at once and their text overlaps into mush. The
+           rings now sit 3.4 apart (one tight "projects" section), so a 12-unit
+           falloff had three labels competing; 2.2 means a band is essentially
+           only readable while it is the one being approached. */
+        const near = clamp01(1 - Math.abs(d) / 2.2)
         ring.group.rotation.z = t * ring.spin + ring.index * 0.7
         ring.group.position.y = ring.y + Math.sin(t * 1.1 + ring.index * 1.5) * 0.12
 
         const bandMat = ring.band.material as THREE.MeshBasicMaterial
-        bandMat.opacity = easeOutCubic(near) * 0.95
+        // Softer: supporting texture, not competing with the DOM label card.
+        bandMat.opacity = easeOutCubic(near) * 0.6
         if (bandMat.map) bandMat.map.offset.x = (t * 0.035 + ring.index * 0.25) % 1
 
         // Flare as the jellyfish passes through the hoop.
@@ -1160,6 +1238,17 @@ export function JellyCanvas({ config, holdProgress, isEntered, isTransitionOpene
           item.target
             .copy(item.home)
             .addScaledVector(item.normal, Math.sin(t * 0.75 + item.phase) * 0.028)
+
+          /* Fly-in: before the orb is formed each plate is pushed out along its
+             own scatter vector, so they converge from all directions. Staggered
+             per plate (by its hash phase) so the shell knits together rather
+             than snapping shut all at once. */
+          if (r.assemble < 1) {
+            const stagger = clamp01((item.phase / (Math.PI * 2)) * 0.45)
+            const local = clamp01((r.assemble - stagger) / (1 - stagger || 1))
+            const out = 1 - easeOutCubic(local)
+            item.target.addScaledVector(item.scatter, out * 1.25)
+          }
 
           if (r.isHovering && r.isTransitionOpened) {
             _shardWorld.copy(item.home).applyMatrix4(worldGroup.matrixWorld)

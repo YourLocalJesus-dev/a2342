@@ -135,9 +135,13 @@ export const WORLD = {
   ascendTopY: 18,
   /* Rings sit 5.5 apart rather than 9, so they read as one tight cluster the
      jellyfish threads through instead of four isolated events. */
-  ringY: [21.5, 27, 32.5, 38],
-  ringsExitY: 42.5,
-  aureliaY: 47,
+  /* All four rings sit inside ONE short stretch of world: 3.4 units apart, so
+     the whole set spans 10.2 units and the jellyfish crosses them as a single
+     continuous run rather than four separate scroll events. Paired with the
+     smaller RING_R this reads as one "projects" section. */
+  ringY: [21, 24.4, 27.8, 31.2],
+  ringsExitY: 34.6,
+  aureliaY: 39,
 } as const
 
 /* Anchor angles for the four rotation words, in radians around the orbit.

@@ -92,7 +92,9 @@ class SoothingAmbientAudioEngine {
       // SFX bus splits into a dry path and a reverb-wet path so every
       // effect gets a soft ambient tail instead of a dry, punchy hit.
       this.sfxGain = this.ctx.createGain()
-      this.sfxGain.gain.setValueAtTime(0.08, this.ctx.currentTime)
+      /* Was 0.08, which put every effect around -55dBFS once multiplied by
+         the 0.42 master — technically playing but effectively inaudible. */
+      this.sfxGain.gain.setValueAtTime(0.26, this.ctx.currentTime)
 
       this.sfxDryGain = this.ctx.createGain()
       this.sfxDryGain.gain.setValueAtTime(0.6, this.ctx.currentTime)
@@ -569,47 +571,120 @@ class SoothingAmbientAudioEngine {
     }, 320)
   }
 
+  /* Fired the instant the hold completes and the shell bursts. This is the
+     single most important sound on the site, so it is a layered hit rather
+     than the thin sine arpeggio that used to live here:
+       1. a low sub thump for physical impact,
+       2. a filtered noise whoosh riding the shards outward,
+       3. a bright major arpeggio that resolves the tension of the charge. */
   public playHoldBurst() {
     this.stopHoldCharge()
     this.initCtx()
 
     if (!this.ctx || !this.sfxGain || this.isMuted) return
 
-    const now = this.ctx.currentTime
-    const notes = [523.25, 659.25, 783.99, 987.77, 1174.66]
+    const ctx = this.ctx
+    const now = ctx.currentTime
 
+    // ── 1. sub thump ──────────────────────────────────────────────────────
+    const sub = ctx.createOscillator()
+    const subGain = ctx.createGain()
+    sub.type = 'sine'
+    sub.frequency.setValueAtTime(140, now)
+    sub.frequency.exponentialRampToValueAtTime(42, now + 0.5)
+    subGain.gain.setValueAtTime(0.0001, now)
+    subGain.gain.exponentialRampToValueAtTime(0.55, now + 0.02)
+    subGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.9)
+    sub.connect(subGain)
+    subGain.connect(this.sfxGain)
+    sub.start(now)
+    sub.stop(now + 1.0)
+
+    // ── 2. noise whoosh ───────────────────────────────────────────────────
+    const dur = 1.1
+    const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate)
+    const data = buf.getChannelData(0)
+    for (let i = 0; i < data.length; i++) {
+      // Decaying noise: dense at the burst, thinning as the shards fly out.
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2)
+    }
+    const noise = ctx.createBufferSource()
+    noise.buffer = buf
+    const nFilter = ctx.createBiquadFilter()
+    nFilter.type = 'bandpass'
+    nFilter.frequency.setValueAtTime(420, now)
+    nFilter.frequency.exponentialRampToValueAtTime(5200, now + 0.55)
+    nFilter.Q.setValueAtTime(0.7, now)
+    const nGain = ctx.createGain()
+    nGain.gain.setValueAtTime(0.0001, now)
+    nGain.gain.exponentialRampToValueAtTime(0.3, now + 0.06)
+    nGain.gain.exponentialRampToValueAtTime(0.0001, now + 1.0)
+    noise.connect(nFilter)
+    nFilter.connect(nGain)
+    nGain.connect(this.sfxGain)
+    noise.start(now)
+
+    // ── 3. resolving arpeggio ─────────────────────────────────────────────
+    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5]
+    // Local alias: TS loses the null-narrowing of `this.sfxGain` inside the closure.
+    const bus = this.sfxGain
     notes.forEach((frequency, index) => {
-      if (!this.ctx || !this.sfxGain) return
+      const oscillator = ctx.createOscillator()
+      const filter = ctx.createBiquadFilter()
+      const gain = ctx.createGain()
+      const start = now + 0.04 + index * 0.055
 
-      const oscillator = this.ctx.createOscillator()
-      const filter = this.ctx.createBiquadFilter()
-      const gain = this.ctx.createGain()
-      const start = now + index * 0.07
-
-      oscillator.type = 'sine'
+      oscillator.type = 'triangle'
       oscillator.frequency.setValueAtTime(frequency, start)
 
       filter.type = 'bandpass'
       filter.frequency.setValueAtTime(frequency, start)
-      filter.Q.setValueAtTime(3, start)
+      filter.Q.setValueAtTime(2.2, start)
 
       gain.gain.setValueAtTime(0.0001, start)
-      gain.gain.exponentialRampToValueAtTime(
-        0.05 / (index * 0.3 + 1),
-        start + 0.05,
-      )
-      gain.gain.exponentialRampToValueAtTime(
-        0.0001,
-        start + 2,
-      )
+      gain.gain.exponentialRampToValueAtTime(0.4 / (index * 0.22 + 1), start + 0.03)
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 1.9)
 
       oscillator.connect(filter)
       filter.connect(gain)
-      gain.connect(this.sfxGain)
+      gain.connect(bus)
 
       oscillator.start(start)
-      oscillator.stop(start + 2.2)
+      oscillator.stop(start + 2.1)
     })
+  }
+
+  /* Rising tone while the shards fly in and the camera dollies to the orb. */
+  public playAssembleSweep() {
+    this.initCtx()
+    if (!this.ctx || !this.sfxGain || this.isMuted) return
+
+    const ctx = this.ctx
+    const now = ctx.currentTime
+    const dur = 2.4
+
+    const osc = ctx.createOscillator()
+    const filter = ctx.createBiquadFilter()
+    const gain = ctx.createGain()
+
+    osc.type = 'sawtooth'
+    osc.frequency.setValueAtTime(55, now)
+    osc.frequency.exponentialRampToValueAtTime(196, now + dur)
+
+    filter.type = 'lowpass'
+    filter.frequency.setValueAtTime(220, now)
+    filter.frequency.exponentialRampToValueAtTime(2600, now + dur)
+    filter.Q.setValueAtTime(4, now)
+
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.linearRampToValueAtTime(0.16, now + dur * 0.75)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + dur + 0.25)
+
+    osc.connect(filter)
+    filter.connect(gain)
+    gain.connect(this.sfxGain)
+    osc.start(now)
+    osc.stop(now + dur + 0.3)
   }
 }
 
