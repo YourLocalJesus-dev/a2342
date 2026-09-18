@@ -7,6 +7,7 @@ import { ContactModal } from './components/ContactModal'
 import { sound } from './components/AudioEngine'
 import { ScrollNarrative } from './components/ScrollNarrative'
 import { scrollStore } from './scroll'
+import { preloadAll, PRELOAD_TIMEOUT_MS } from './preload'
 
 const PALETTE_COLORS = [
   '#000000', '#0433FF', '#1A0A53', '#942192', '#791A3E', '#5C0000',
@@ -61,22 +62,53 @@ function App() {
   const [jellyConfig, setJellyConfig] = useState<JellyConfig>(DEFAULT_JELLY_CONFIG)
 
   useEffect(() => {
-    let current = 0
-    const interval = setInterval(() => {
-      const step = current < 65 ? Math.floor(Math.random() * 8) + 4 : Math.floor(Math.random() * 5) + 1
-      current = Math.min(current + step, 100)
-      setLoadPercentage(current)
+    let alive = true
+    let shown = 0
+    let actual = 0
+    let raf = 0
+    let finishTimer = 0
 
-      if (current >= 100) {
-        clearInterval(interval)
-        setTimeout(() => {
-          setIsPreloaderDone(true)
-          sound.playClick(1050)
-        }, 250)
+    const finish = () => {
+      if (!alive) return
+      setLoadPercentage(100)
+      finishTimer = window.setTimeout(() => {
+        if (!alive) return
+        setIsPreloaderDone(true)
+        sound.playClick(1050)
+      }, 250)
+    }
+
+    const tick = () => {
+      if (!alive) return
+      shown += (actual - shown) * 0.12
+      if (actual >= 100 && actual - shown < 0.4) {
+        shown = 100
+        setLoadPercentage(100)
+        finish()
+        return
       }
-    }, 38)
+      setLoadPercentage(Math.min(99, Math.floor(shown)))
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
 
-    return () => clearInterval(interval)
+    const bail = window.setTimeout(() => {
+      actual = 100
+    }, PRELOAD_TIMEOUT_MS)
+
+    preloadAll((fraction) => {
+      actual = Math.max(actual, fraction * 100)
+    }).finally(() => {
+      window.clearTimeout(bail)
+      actual = 100
+    })
+
+    return () => {
+      alive = false
+      cancelAnimationFrame(raf)
+      window.clearTimeout(bail)
+      window.clearTimeout(finishTimer)
+    }
   }, [])
 
   useEffect(() => {
@@ -592,7 +624,7 @@ function App() {
         </div>
       </div>
 
-            <JellyCanvas
+            {isPreloaderDone && <JellyCanvas
         config={jellyConfig}
         holdProgress={holdProgress}
         isEntered={isEntered}
@@ -604,7 +636,7 @@ function App() {
             setCursorText(isHovering ? 'CLICK AND HOLD' : '')
           }
         }}
-      />
+      />}
 
             <div className={`hero-bottom-bar ${isEntered ? 'is-hidden' : ''} ${isAssembled ? 'is-visible' : ''}`}>
         <div className="bottom-row">
